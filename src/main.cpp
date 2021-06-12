@@ -4,16 +4,22 @@
 #include <AsyncJson.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <Wire.h>
 #include <vector>
 #include "CEC_Device.h"
+#include "DDCVCP.h"
 
-#define WIFI_SSID           "ac55.wifi.nickpalmer.net"
-#define WIFI_PASS           "B16b00b5"
-#define CEC_GPIO 5
-#define CEC_DEVICE_TYPE CEC_Device::CDT_PLAYBACK_DEVICE
-#define CEC_PHYSICAL_ADDRESS 0x4000
+#define WIFI_SSID             "ac55.wifi.nickpalmer.net"
+#define WIFI_PASS             "B16b00b5"
+#define CEC_GPIO              5
+#define CEC_DEVICE_TYPE       CEC_Device::CDT_PLAYBACK_DEVICE
+#define CEC_PHYSICAL_ADDRESS  0x4000
+#define ONBOARD_LED           2
+#define EDID_ADDRESS          0x50
+#define EDID_LENGTH           128
 
 AsyncWebServer server(80);
+DDCVCP ddc;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 std::vector<std::string> history;
 
@@ -215,6 +221,7 @@ void handleStandby(AsyncWebServerRequest* request)
 
   auto response = new PrettyAsyncJsonResponse(false, 16);
 
+  response->setLength();
   request->send(response);
 }
 
@@ -271,14 +278,72 @@ void handleTransmit(AsyncWebServerRequest* request)
   request->send(response);
 }
 
+void parseEdid(unsigned char* edid)
+{
+  uint32_t header = *((uint32_t*)edid);
+  uint16_t manufacturer = *((uint16_t*)(edid + 0x08));
+  uint8_t version = edid[0x12];
+  uint8_t revision = edid[0x13];
+  uint8_t ieee0 = edid[0x95];
+  uint8_t ieee1 = edid[0x96];
+  uint8_t ieee2 = edid[0x97];
+  uint16_t physicalAddress = *((uint16_t*)(edid + 0x98));
+
+  uint8_t sum = 0;
+  for (int i = 0; i < EDID_LENGTH; i++)
+  {
+    sum += edid[0];
+  }
+  Serial.printf("EDID checksum: %u\n", sum);
+  Serial.printf("EDID header: %08x\n", header);
+  Serial.printf("EDID version: %u revision: %u\n", version, revision);
+  Serial.printf("EDID manufacturer: %04x\n", manufacturer);
+  Serial.printf("IEEE ID: %02x%02x%02x\n", ieee0, ieee1, ieee2);
+  uint8_t a0 = physicalAddress >> 12;
+  uint8_t a1 = (physicalAddress >> 8) & 0xf;
+  uint8_t a2 = (physicalAddress >> 4) & 0xf;
+  uint8_t a3 = physicalAddress & 0xf;
+  Serial.printf("CEC Physical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
+}
+
 void setup()
 {
-  BLEDevice::init("TvHdmiCec");
+  digitalWrite(ONBOARD_LED, HIGH); 
   pinMode(CEC_GPIO, INPUT_PULLUP);
 
   Serial.begin(115200);
-  while (!Serial);
+  while (!Serial) delay(50);
 
+  Wire.begin();
+  Wire.requestFrom(EDID_ADDRESS, EDID_LENGTH, true);
+
+  uint8_t edid[EDID_LENGTH];
+  int totalRead = 0;
+  while (totalRead < EDID_LENGTH)
+  {
+    int read = Wire.readBytes(edid + totalRead, EDID_LENGTH - totalRead);
+    if (read == 0)
+    {
+      Serial.println("EDID timeout");
+      delay(1000);
+    }
+
+    totalRead += read;
+  }
+
+  Serial.println("EDID Received");
+
+  parseEdid(edid);
+
+  BLEDevice::init("TvHdmiCec"); 
+
+  while (!ddc.begin()) 
+  {
+    Serial.println("Unable to find DDC/CI. Trying again in 5 seconds.");
+    delay(5000);
+  }
+  Serial.println("Found DDC/CI successfully"); 
+  
   device.Initialize(CEC_PHYSICAL_ADDRESS, CEC_DEVICE_TYPE, true); // Promiscuous mode}
 
   server.on("/heap", HTTP_GET, handleHeap);
@@ -289,7 +354,9 @@ void setup()
 
   connectWiFi();
 
-  server.begin();  
+  server.begin();
+
+  digitalWrite(ONBOARD_LED, LOW);
 }
 
 void loop()
