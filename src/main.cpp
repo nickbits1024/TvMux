@@ -308,8 +308,9 @@ void parseEdid(unsigned char* edid)
 
 void setup()
 {
-  digitalWrite(ONBOARD_LED, HIGH); 
   pinMode(CEC_GPIO, INPUT_PULLUP);
+  pinMode(ONBOARD_LED, OUTPUT);
+  digitalWrite(ONBOARD_LED, HIGH); 
 
   Serial.begin(115200);
   while (!Serial) delay(50);
