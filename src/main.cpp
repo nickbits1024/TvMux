@@ -113,10 +113,6 @@ void MyCEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
     s += hex;
   }
 
-  // Ignore messages not sent to us
-  if ((buffer[0] & 0xf) != LogicalAddress())
-    return;
-
   portENTER_CRITICAL(&mux);
   history.push_back(s);
   if (history.size() > MAX_HISTORY)
@@ -124,6 +120,10 @@ void MyCEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
     history.erase(history.begin());
   }
   portEXIT_CRITICAL(&mux);
+
+  // Ignore messages not sent to us
+  if ((buffer[0] & 0xf) != LogicalAddress())
+    return; 
 
   switch (buffer[1])
   {
@@ -258,6 +258,8 @@ void handle_transmit(AsyncWebServerRequest* request)
 
   int target = request->arg("target").toInt();
   String cmd = request->arg("cmd");
+
+  cmd.replace(":", "");
 
   char buffer[256];
   int len = cmd.length() / 2;
@@ -552,11 +554,11 @@ void loop()
     unsigned long start = millis();
     //Serial.println("HPD down");
     //unsigned long end = start;
-    while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 2000)
+    while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 5000)
     {
     }
     unsigned long t = millis() - start;
-    if (t >= 2000)
+    if (t >= 5000)
     {
       Serial.println("HDMI unplugged, rebooting in 5s...");
       delay(5000);
