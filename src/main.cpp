@@ -75,7 +75,13 @@ void MyCEC_Device::OnReady(int logicalAddress)
   // This is called after the logical address has been allocated
 
   //unsigned char buf[4] = { 0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE };
-  unsigned char buf[4] = { 0x84, cec_physical_address >> 8, cec_physical_address & 0xff, CEC_DEVICE_TYPE };
+  unsigned char buf[4] =
+  {
+    0x84,
+    (unsigned char)(cec_physical_address >> 8),
+    (unsigned char)(cec_physical_address & 0xff),
+    CEC_DEVICE_TYPE
+  };
 
   DbgPrint("Device ready, Logical address assigned: %d\n", logicalAddress);
 
@@ -124,7 +130,13 @@ void MyCEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
   case 0x83:
     { // <Give Physical Address>
       //unsigned char buf[4] = { 0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE };
-      unsigned char buf[4] = { 0x84, cec_physical_address >> 8, cec_physical_address & 0xff, CEC_DEVICE_TYPE };
+      unsigned char buf[4] =
+      {
+        0x84,
+        (unsigned char)(cec_physical_address >> 8),
+        (unsigned char)(cec_physical_address & 0xff),
+        CEC_DEVICE_TYPE
+      };
       TransmitFrame(0xf, buf, 4); // <Report Physical Address>
       break;
     }
@@ -284,7 +296,7 @@ void handle_transmit(AsyncWebServerRequest* request)
 
   portEXIT_CRITICAL(&mux);
 
-  auto response = new PrettyAsyncJsonResponse(true, 256);
+  auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
 
   doc["target"] = target;
