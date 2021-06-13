@@ -258,7 +258,7 @@ void handle_transmit(AsyncWebServerRequest* request)
   for (int i = 0; i < len; i++)
   {
     String hex = cmd.substring(i * 2, i * 2 + 2);
-    Serial.printf("hex=%s\n", hex.c_str());
+    //Serial.printf("hex=%s\n", hex.c_str());
     unsigned int temp;
     sscanf(hex.c_str(), "%02x", &temp);
     buffer[i] = (char)temp;
@@ -268,6 +268,10 @@ void handle_transmit(AsyncWebServerRequest* request)
 
   for (int i = 0; i < len; i++)
   {
+    if (i != 0)
+    {
+      temp += ":";
+    }
     char hex[3];
     snprintf(hex, 3, "%02x", buffer[i]);
     temp += hex;
@@ -286,6 +290,7 @@ void handle_transmit(AsyncWebServerRequest* request)
   doc["target"] = target;
   doc["cmd"] = temp;
 
+  response->setLength();
   request->send(response);
 }
 
