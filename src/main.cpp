@@ -92,7 +92,7 @@ void HomeCec::OnReady(int logicalAddress)
     CEC_DEVICE_TYPE
   };
 
-  DbgPrint("Device ready, Logical address assigned: %d\n", logicalAddress);
+  DbgPrint("CEC Logical Address: : %d\n", logicalAddress);
 
   TransmitFrame(0xf, buf, 4); // <Report Physical Address>
 }
@@ -128,7 +128,10 @@ void add_history(const char* prefix, unsigned char* buffer, int count, bool ack)
 
   format_bytes(ss, buffer, count);
 
-  ss << (ack ? " !" : " ?");
+  if (!ack)
+  {
+    ss << " !";
+  }
 
   // // This is called when a frame is received.  To transmit
   // // a frame call TransmitFrame.  To receive all frames, even
@@ -252,9 +255,6 @@ void connect_wiFi()
   IPAddress ip = WiFi.localIP();
   Serial.print("IP Address: ");
   Serial.println(ip);
-  long rssi = WiFi.RSSI();
-  Serial.print(rssi);
-  Serial.println(" dBm");
 }
 
 void handle_404(AsyncWebServerRequest* request)
@@ -472,8 +472,8 @@ bool parse_edid(unsigned char* edid)
     sum += (uint32_t)edid[i];
   }
 
-  Serial.printf("EDID checksum: %08x\n", sum);
-  Serial.printf("EDID header: %08x%08x\n", header0, header1);
+  //Serial.printf("EDID checksum: %08x\n", sum);
+  //Serial.printf("EDID header: %08x%08x\n", header0, header1);
 
   if (header0 != 0x00ffffff || header1 != 0xffffff00)
   {
@@ -532,7 +532,7 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
     return false;
   }
 
-  Serial.printf("EDID ext checksum: %08x\n", sum);
+  //Serial.printf("EDID ext checksum: %08x\n", sum);
 
   uint8_t tag = ext[0];
   uint8_t revision = ext[1];
@@ -548,11 +548,11 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
     return false;
   }
 
-  for (int i = 0; i < EDID_EXTENSION_LENGTH; i++)
-  {
-    Serial.printf("0x%02x, ", ext[i]);
-  }
-  Serial.println();
+  // for (int i = 0; i < EDID_EXTENSION_LENGTH; i++)
+  // {
+  //   Serial.printf("0x%02x, ", ext[i]);
+  // }
+  // Serial.println();
 
   uint8_t index = offset;
 
