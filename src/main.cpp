@@ -539,9 +539,9 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
   uint8_t dtd_offset = ext[2];
   uint8_t offset = 4;
 
-  Serial.printf("EDID ext tag: %u\n", tag);
-  Serial.printf("EDID ext revision: %u\n", revision);
-  Serial.printf("EDID ext dtd_offset: %u\n", dtd_offset);
+  // Serial.printf("EDID ext tag: %u\n", tag);
+  // Serial.printf("EDID ext revision: %u\n", revision);
+  // Serial.printf("EDID ext dtd_offset: %u\n", dtd_offset);
 
   if (tag != 2)
   {
@@ -562,7 +562,7 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
     uint8_t tag = p[0] >> 5;
     uint8_t length = p[0] & 0x1f;
 
-    Serial.printf("EDID ext tag: %d length: %d\n", tag, length);
+    //Serial.printf("EDID ext tag: %d length: %d\n", tag, length);
 
     switch (tag)
     {
@@ -572,7 +572,7 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
         ieee[0] = p[3];
         ieee[1] = p[2];
         ieee[2] = p[1];
-        Serial.printf("EDID IEEE %02x %02x %02x\n", ieee[0], ieee[1], ieee[2]);
+        //Serial.printf("EDID IEEE %02x %02x %02x\n", ieee[0], ieee[1], ieee[2]);
         if (ieee[0] == 0x00 && ieee[1] == 0x0c && ieee[2] == 0x03)
         {
           cec_physical_address = (uint16_t)p[4] << 8 | p[5];
