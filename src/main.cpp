@@ -27,7 +27,9 @@
 #define EDID_EXTENSION_DATA_LENGTH  125
 #define EDID_EXTENSION_FLAG   0x7e
 
-#define HOTPLUG_GPIO          23
+#define HOTPLUG_GPIO          19
+#define HOTPLUG_ANALOG_GPIO   36
+#define HOTPLUG_LOW_VOLTAGE   0.4
 
 AsyncWebServer server(80);
 //DDCVCP ddc;
@@ -99,14 +101,13 @@ void HomeCec::OnReady(int logicalAddress)
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count)
 {
-  ss << std::hex << std::setw(2) << std::setfill('0');
   for (int i = 0; i < count; i++)
   {
     if (i != 0)
     {
       ss << ":";
     }
-    ss << (int)buffer[i];
+    ss << std::hex << std::setfill('0') << std::setw(2) << (int)buffer[i];
   }
 }
 
@@ -187,7 +188,6 @@ void HomeCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
       xSemaphoreGive(reply_ready_sem);
     }
   }
-  portEXIT_CRITICAL(&mux);
 
   switch (buffer[1])
   {
@@ -208,6 +208,7 @@ void HomeCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
     TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
     break;
   }
+  portEXIT_CRITICAL(&mux);
 }
 
 HomeCec device;
@@ -240,15 +241,15 @@ void connect_wiFi()
     WiFi.disconnect();  //ESP has tendency to store old SSID and PASSword and tries to connect
     delay(100);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
-    Serial.println("Connecting to WiFi...");
+    Serial.print("Connecting to WiFi...");
     for (int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; i++)
     {
       delay(2000);
-      Serial.print("*");
+      Serial.print(".");
     }
 
   } while (WiFi.status() != WL_CONNECTED);
-
+  Serial.println();
   Serial.println("Connected to WiFi");
   Serial.print("SSID: ");
   Serial.println(WiFi.SSID());
@@ -317,9 +318,10 @@ void handle_send(AsyncWebServerRequest* request)
   String cmd = request->arg("cmd");
   String reply_command = request->arg("reply");
 
-  char buffer[256];
+  char buffer[CEC_MAX_MSG_SIZE];
   int len = (cmd.length() + 1) / 3;
-  if (len > sizeof(buffer) ||
+  if (len == 0 ||
+    len > sizeof(buffer) ||
     (reply_command.length() != 0 && reply_command.length() != 2))
   {
     request->send(500);
@@ -348,19 +350,19 @@ void handle_send(AsyncWebServerRequest* request)
   //Serial.printf("send %u bytes, %s\n", len, temp.c_str());
 
   int reply_command_value = -1;
-  if (reply_command.length() != 0)
+  if (reply_command.length() == 2)
   {
     hex = reply_command.c_str();
-    scanf(hex, "%02x", &reply_command_value);
+    sscanf(hex, "%02x", &reply_command_value);
   }
 
 #ifdef ENABLE_HDMI
   portENTER_CRITICAL(&mux);
-  if (reply_command.length() != 0)
+  if (reply_command.length() == 2)
   {
     hex = reply_command.c_str();
     unsigned int temp;
-    scanf(hex, "%02x", &temp);
+    sscanf(hex, "%02x", &temp);
     reply_length = CEC_MAX_MSG_SIZE;
     reply_filter = (unsigned char)reply_command_value;
   }
@@ -373,14 +375,23 @@ void handle_send(AsyncWebServerRequest* request)
   portEXIT_CRITICAL(&mux);
 
   std::string reply_string;
+  const char* reply_status = "ok";
 
   if (reply_command_value != -1)
   {
+    Serial.printf("Waiting for reply %02x\n", reply_command_value);
     if (xSemaphoreTake(reply_ready_sem, 5000 / portTICK_PERIOD_MS))
     {
-      format_bytes(reply_string, reply, reply_length);
+      if (reply_length > 1)
+      {
+        format_bytes(reply_string, reply + 1, reply_length - 1);
+      }
 
-      xSemaphoreGive(reply_ready_sem);
+      //xSemaphoreGive(reply_ready_sem);
+    }
+    else
+    {
+      reply_status = "error";
     }
   }
 
@@ -394,6 +405,7 @@ void handle_send(AsyncWebServerRequest* request)
   doc["cmd"] = cmd;
   if (reply_command_value != -1)
   {
+    doc["reply_status"] = reply_status;
     doc["reply"] = reply_string.c_str();
   }
 
@@ -497,9 +509,9 @@ bool parse_edid(unsigned char* edid)
   uint8_t revision = edid[0x13];
   uint8_t extension_flag = edid[EDID_EXTENSION_FLAG];
 
-  Serial.printf("EDID version: %u revision: %u\n", version, revision);
+  Serial.printf("EDID version: %u.%u\n", version, revision);
   Serial.printf("EDID manufacturer: %s\n", manufacturer);
-  Serial.printf("EDID extension_flag: %d\n", extension_flag);
+  //Serial.printf("EDID extension_flag: %d\n", extension_flag);
 
   return true;
   /*
@@ -614,6 +626,11 @@ byte readI2CByte(byte data_addr)
 //   hdmi_unplugged = true;
 // }
 
+double get_hotplug_voltage()
+{
+  return analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
+}
+
 void setup()
 {
   reply_ready_sem = xSemaphoreCreateBinary();
@@ -623,6 +640,7 @@ void setup()
   pinMode(CEC_GPIO, INPUT_PULLUP);
   pinMode(ONBOARD_LED, OUTPUT);
   digitalWrite(ONBOARD_LED, HIGH);
+  delay(50);
 
   Serial.begin(115200);
   while (!Serial) delay(50);
@@ -630,12 +648,15 @@ void setup()
 #ifdef ENABLE_HDMI  
   Serial.println("Waiting for hotplug signal...");
   while (digitalRead(HOTPLUG_GPIO) == LOW) delay(50);
+  double hpv = 0;
+  //while ((hpv = get_hotplug_voltage()) < HOTPLUG_LOW_VOLTAGE) delay(50);
+  //delay(500);
+   
+  Serial.printf("Hotplug signal detected (v=%.2f)!\n", hpv);
 
-  Serial.println("Hotplug signal detected!");
-
+  //delay(10000);
   //attachInterrupt(digitalPinToInterrupt(HOTPLUG_GPIO), on_hdmi_unplugged, FALLING);
-
-
+  
   Wire.begin();
   uint8_t edid[EDID_LENGTH];
   uint8_t edid_extension[EDID_EXTENSION_LENGTH];
@@ -646,7 +667,7 @@ void setup()
       edid[i] = readI2CByte(i);
     }
 
-    Serial.println("EDID Received");
+    Serial.println("Received EDID");
 
   } while (!parse_edid(edid));
 
@@ -659,13 +680,14 @@ void setup()
         edid_extension[i] = readI2CByte(EDID_LENGTH + i);
       }
 
-      Serial.println("EDID EXT Received");
+      Serial.println("Received EDID extension");
 
     } while (!parse_edid_extension(edid, edid_extension));
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-#endif 
+
+#endif
 
   BLEDevice::init("TvHdmiCec");
 
@@ -688,23 +710,32 @@ void loop()
   connect_wiFi();
 
 #ifdef ENABLE_HDMI
-  device.Run();
 
-  if (digitalRead(HOTPLUG_GPIO) == LOW)
-  {
-    unsigned long start = millis();
-    //Serial.println("HPD down");
-    //unsigned long end = start;
-    while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 5000)
-    {
-    }
-    unsigned long t = millis() - start;
-    if (t >= 5000)
-    {
-      Serial.println("HDMI unplugged, rebooting in 5s...");
-      delay(5000);
-      ESP.restart();
-    }
-  }
+  portENTER_CRITICAL(&mux);
+  device.Run();
+  portEXIT_CRITICAL(&mux);
+
+  // bool hph = digitalRead(HOTPLUG_GPIO) == HIGH;
+  // double hpv = get_hotplug_voltage();
+  // //if (!hph)
+  // if (hpv < HOTPLUG_LOW_VOLTAGE)
+  // {
+  //   // unsigned long start = millis();
+  //   // //Serial.println("HPD down");
+  //   // //unsigned long end = start;
+  //   // while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 5000)
+  //   // {
+  //   // }
+  //   // unsigned long t = millis() - start;
+  //   // if (t >= 5000)
+  //   // {
+
+  //   //double v = analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
+  //   Serial.printf("HDMI unplugged, rebooting in 5s (h=%d, v=%.2fV)...\n", hph, hpv);
+  //   delay(5000);
+  //   ESP.restart();
+  //   //}
+  // }
+  //delay(5);
 #endif
 }
