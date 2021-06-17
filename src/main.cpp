@@ -3,33 +3,18 @@
 #include <BLEDevice.h>
 #include <AsyncJson.h>
 #include <WiFi.h>
-#include <ESPAsyncWebServer.h>
 #include <Wire.h>
-#include <iomanip>
+#include <ESPAsyncWebServer.h>
 #include <list>
-#include "CEC_Device.h"
-//#include "DDCVCP.h"
-
-
-#define ENABLE_HDMI
+#include "cec.h"
 
 #define WIFI_SSID             "ac55.wifi.nickpalmer.net"
 #define WIFI_PASS             "B16b00b5"
-#define CEC_GPIO              5
-#define CEC_DEVICE_TYPE       CEC_Device::CDT_PLAYBACK_DEVICE
-#define CEC_MAX_MSG_SIZE        16
-//#define CEC_PHYSICAL_ADDRESS  0x4000
-#define MAX_HISTORY           64
 #define ONBOARD_LED           2
-#define EDID_ADDRESS          0x50
-#define EDID_LENGTH           128
-#define EDID_EXTENSION_LENGTH 128
-#define EDID_EXTENSION_DATA_LENGTH  125
-#define EDID_EXTENSION_FLAG   0x7e
 
 #define HOTPLUG_GPIO          19
-#define HOTPLUG_ANALOG_GPIO   36
-#define HOTPLUG_LOW_VOLTAGE   0.4
+//#define HOTPLUG_ANALOG_GPIO   36
+//#define HOTPLUG_LOW_VOLTAGE   0.4
 
 AsyncWebServer server(80);
 //DDCVCP ddc;
@@ -41,190 +26,8 @@ xSemaphoreHandle reply_ready_sem;
 unsigned char reply[CEC_MAX_MSG_SIZE];
 int reply_length;
 unsigned char reply_filter;
-
-class HomeCec : public CEC_Device
-{
-protected:
-  virtual bool LineState();
-  virtual void SetLineState(bool);
-  virtual void OnReady(int logicalAddress);
-  virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
-  virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
-
-public:
-  HomeCec();
-};
-
-HomeCec::HomeCec()
-{
-
-}
-
-bool HomeCec::LineState()
-{
-  int state = digitalRead(CEC_GPIO);
-  return state != LOW;
-}
-
-void HomeCec::SetLineState(bool state)
-{
-  if (state)
-  {
-    pinMode(CEC_GPIO, INPUT_PULLUP);
-  }
-  else
-  {
-    digitalWrite(CEC_GPIO, LOW);
-    pinMode(CEC_GPIO, OUTPUT);
-  }
-  // give enough time for the line to settle before sampling it
-  delayMicroseconds(50);
-}
-
-void HomeCec::OnReady(int logicalAddress)
-{
-  // This is called after the logical address has been allocated
-
-  //unsigned char buf[4] = { 0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE };
-  unsigned char buf[4] =
-  {
-    0x84,
-    (unsigned char)(cec_physical_address >> 8),
-    (unsigned char)(cec_physical_address & 0xff),
-    CEC_DEVICE_TYPE
-  };
-
-  DbgPrint("CEC Logical Address: : %d\n", logicalAddress);
-
-  TransmitFrame(0xf, buf, 4); // <Report Physical Address>
-}
-
-void format_bytes(std::stringstream& ss, unsigned char* buffer, int count)
-{
-  for (int i = 0; i < count; i++)
-  {
-    if (i != 0)
-    {
-      ss << ":";
-    }
-    ss << std::hex << std::setfill('0') << std::setw(2) << (int)buffer[i];
-  }
-}
-
-void format_bytes(std::string& s, unsigned char* buffer, int count)
-{
-  std::stringstream ss;
-
-  format_bytes(ss, buffer, count);
-
-  s = ss.str();
-}
-
-void add_history(const char* prefix, unsigned char* buffer, int count, bool ack)
-{
-  std::stringstream ss;
-
-  ss << millis() << " " << prefix << " ";
-
-
-  format_bytes(ss, buffer, count);
-
-  if (!ack)
-  {
-    ss << " !";
-  }
-
-  // // This is called when a frame is received.  To transmit
-  // // a frame call TransmitFrame.  To receive all frames, even
-  // // those not addressed to this device, set Promiscuous to true.
-  // DbgPrint("Packet received at %ld: %02x", millis(), buffer[0]);
-  // for (int i = 1; i < count; i++)
-  //   DbgPrint(":%02X", buffer[i]);
-  // if (!ack)
-  //   DbgPrint(" NAK");
-  // DbgPrint("\n");
-
-  // std::string s;
-
-  // for (int i = 0; i < count; i++)
-  // {
-  //   char hex[3];
-  //   snprintf(hex, 3, "%02x", buffer[i]);
-  //   s += hex;
-  // }
-
-  std::string s(ss.str());
-
-  Serial.println(s.c_str());
-
-  portENTER_CRITICAL(&mux);
-  history.push_front(s);
-  if (history.size() > MAX_HISTORY)
-  {
-    history.pop_back();
-  }
-  portEXIT_CRITICAL(&mux);
-}
-
-void HomeCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
-{
-  // No command received?
-  if (count < 2)
-    return;
-
-  add_history("rx", buffer, count, ack);
-
-  // Ignore messages not sent to us
-  if ((buffer[0] & 0xf) != LogicalAddress())
-    return;
-
-  portENTER_CRITICAL(&mux);
-  if (reply_length != 0)
-  {
-    if (buffer[1] == reply_filter && count <= CEC_MAX_MSG_SIZE)
-    {
-      memcpy(reply, buffer, count);
-      reply_length = count;
-      xSemaphoreGive(reply_ready_sem);
-    }
-  }
-
-  switch (buffer[1])
-  {
-  case 0x83:
-    { // <Give Physical Address>
-      //unsigned char buf[4] = { 0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE };
-      unsigned char buf[4] =
-      {
-        0x84,
-        (unsigned char)(cec_physical_address >> 8),
-        (unsigned char)(cec_physical_address & 0xff),
-        CEC_DEVICE_TYPE
-      };
-      TransmitFrame(0xf, buf, 4); // <Report Physical Address>
-      break;
-    }
-  case 0x8c: // <Give Device Vendor ID>
-    TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
-    break;
-  }
-  portEXIT_CRITICAL(&mux);
-}
-
-HomeCec device;
-
-void HomeCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
-{
-  // // This is called after a frame is transmitted.
-  // DbgPrint("Packet sent at %ld: %02X", millis(), buffer[0]);
-  // for (int i = 1; i < count; i++)
-  //   DbgPrint(":%02X", buffer[i]);
-  // if (!ack)
-  //   DbgPrint(" NAK");
-  // DbgPrint("\n");
-
-  add_history("tx", buffer, count, ack);
-}
+double last_hpd_time;
+HomeTvCec device;
 
 void connect_wiFi()
 {
@@ -301,9 +104,8 @@ void handle_standby(AsyncWebServerRequest* request)
   portENTER_CRITICAL(&mux);
   char buffer[1];
 
-  buffer[0] = 0x36;
+  buffer[0] = 0x36;  
   device.TransmitFrame(0xf, (unsigned char*)buffer, 1);
-
   portEXIT_CRITICAL(&mux);
 
   auto response = new PrettyAsyncJsonResponse(false, 16);
@@ -356,7 +158,6 @@ void handle_send(AsyncWebServerRequest* request)
     sscanf(hex, "%02x", &reply_command_value);
   }
 
-#ifdef ENABLE_HDMI
   portENTER_CRITICAL(&mux);
   if (reply_command.length() == 2)
   {
@@ -394,8 +195,6 @@ void handle_send(AsyncWebServerRequest* request)
       reply_status = "error";
     }
   }
-
-#endif
 
   auto response = new PrettyAsyncJsonResponse(false, 256);
 
@@ -626,9 +425,21 @@ byte readI2CByte(byte data_addr)
 //   hdmi_unplugged = true;
 // }
 
-double get_hotplug_voltage()
+// double get_hotplug_voltage()
+// {
+//   return analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
+// }
+
+double uptimed()
 {
-  return analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
+  return esp_timer_get_time() / 1000000.0;
+}
+
+void cec_loop(void* param)
+{
+  portENTER_CRITICAL(&mux);
+  device.Run();
+  portEXIT_CRITICAL(&mux); 
 }
 
 void setup()
@@ -636,7 +447,7 @@ void setup()
   reply_ready_sem = xSemaphoreCreateBinary();
   xSemaphoreTake(reply_ready_sem, 0);
 
-  pinMode(HOTPLUG_GPIO, INPUT_PULLDOWN);
+  pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
   pinMode(CEC_GPIO, INPUT_PULLUP);
   pinMode(ONBOARD_LED, OUTPUT);
   digitalWrite(ONBOARD_LED, HIGH);
@@ -645,14 +456,14 @@ void setup()
   Serial.begin(115200);
   while (!Serial) delay(50);
 
-#ifdef ENABLE_HDMI  
   Serial.println("Waiting for hotplug signal...");
-  while (digitalRead(HOTPLUG_GPIO) == LOW) delay(50);
-  double hpv = 0;
+  while (digitalRead(HOTPLUG_GPIO) == HIGH) delay(50);
+  //double hpv = 0;
   //while ((hpv = get_hotplug_voltage()) < HOTPLUG_LOW_VOLTAGE) delay(50);
   //delay(500);
    
-  Serial.printf("Hotplug signal detected (v=%.2f)!\n", hpv);
+  Serial.printf("Hotplug signal detected!\n");
+  last_hpd_time = uptimed();
 
   //delay(10000);
   //attachInterrupt(digitalPinToInterrupt(HOTPLUG_GPIO), on_hdmi_unplugged, FALLING);
@@ -686,8 +497,7 @@ void setup()
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-
-#endif
+  xTaskCreate(cec_loop, "cec_loop", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
   BLEDevice::init("TvHdmiCec");
 
@@ -709,33 +519,37 @@ void loop()
 {
   connect_wiFi();
 
-#ifdef ENABLE_HDMI
+  double hpd_time;
+  double now = uptimed();
+  bool hpd = digitalRead(HOTPLUG_GPIO) == LOW;
 
   portENTER_CRITICAL(&mux);
-  device.Run();
-  portEXIT_CRITICAL(&mux);
+  if (hpd)
+  {
+    last_hpd_time = now;
+  }
+  hpd_time = last_hpd_time;
+  portEXIT_CRITICAL(&mux); 
 
-  // bool hph = digitalRead(HOTPLUG_GPIO) == HIGH;
-  // double hpv = get_hotplug_voltage();
-  // //if (!hph)
-  // if (hpv < HOTPLUG_LOW_VOLTAGE)
-  // {
-  //   // unsigned long start = millis();
-  //   // //Serial.println("HPD down");
-  //   // //unsigned long end = start;
-  //   // while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 5000)
-  //   // {
-  //   // }
-  //   // unsigned long t = millis() - start;
-  //   // if (t >= 5000)
-  //   // {
+  if (!hpd)
+  {
+    
 
-  //   //double v = analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
-  //   Serial.printf("HDMI unplugged, rebooting in 5s (h=%d, v=%.2fV)...\n", hph, hpv);
-  //   delay(5000);
-  //   ESP.restart();
-  //   //}
-  // }
+    // unsigned long start = millis();
+    // //Serial.println("HPD down");
+    // //unsigned long end = start;
+    // while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 5000)
+    // {
+    // }
+    // unsigned long t = millis() - start;
+    // if (t >= 5000)
+    // {
+
+    //double v = analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
+    // Serial.printf("HDMI unplugged, rebooting in 5s (h=%d, v=%.2fV)...\n", hph, hpv);
+    // delay(5000);
+    // ESP.restart();
+    //}
+  }
   //delay(5);
-#endif
 }
