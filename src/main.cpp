@@ -104,7 +104,7 @@ void handle_standby(AsyncWebServerRequest* request)
   portENTER_CRITICAL(&mux);
   char buffer[1];
 
-  buffer[0] = 0x36;  
+  buffer[0] = 0x36;
   device.TransmitFrame(0xf, (unsigned char*)buffer, 1);
   portEXIT_CRITICAL(&mux);
 
@@ -437,9 +437,13 @@ double uptimed()
 
 void cec_loop(void* param)
 {
-  portENTER_CRITICAL(&mux);
-  device.Run();
-  portEXIT_CRITICAL(&mux); 
+  while (1)
+  {
+    portENTER_CRITICAL(&mux);
+    device.Run();
+    portEXIT_CRITICAL(&mux);
+    yield();
+  }
 }
 
 void setup()
@@ -461,13 +465,13 @@ void setup()
   //double hpv = 0;
   //while ((hpv = get_hotplug_voltage()) < HOTPLUG_LOW_VOLTAGE) delay(50);
   //delay(500);
-   
+
   Serial.printf("Hotplug signal detected!\n");
   last_hpd_time = uptimed();
 
   //delay(10000);
   //attachInterrupt(digitalPinToInterrupt(HOTPLUG_GPIO), on_hdmi_unplugged, FALLING);
-  
+
   Wire.begin();
   uint8_t edid[EDID_LENGTH];
   uint8_t edid_extension[EDID_EXTENSION_LENGTH];
@@ -497,7 +501,7 @@ void setup()
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-  xTaskCreate(cec_loop, "cec_loop", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+  //xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 5, NULL);
 
   BLEDevice::init("TvHdmiCec");
 
@@ -524,21 +528,28 @@ void loop()
   bool hpd = digitalRead(HOTPLUG_GPIO) == LOW;
 
   portENTER_CRITICAL(&mux);
+  device.Run();
   if (hpd)
   {
     last_hpd_time = now;
   }
   hpd_time = last_hpd_time;
-  portEXIT_CRITICAL(&mux); 
-
+  portEXIT_CRITICAL(&mux);
+  //Serial.printf("hpd: %d\n", hpd);
   if (!hpd)
   {
-    
+    Serial.println("HPD down");
+    while (digitalRead(HOTPLUG_GPIO) == HIGH)
+    {
+      yield();
+    }
+    Serial.printf("HPD down for %.5fs\n", uptimed() - hpd_time);
 
     // unsigned long start = millis();
-    // //Serial.println("HPD down");
+
+    delay(100);
     // //unsigned long end = start;
-    // while (digitalRead(HOTPLUG_GPIO) == LOW && (millis() - start) < 5000)
+    // while (digitalRead(HOTP.LUG_GPIO) == LOW && (millis() - start) < 5000)
     // {
     // }
     // unsigned long t = millis() - start;
@@ -551,5 +562,5 @@ void loop()
     // ESP.restart();
     //}
   }
-  //delay(5);
+  //delay(1000);
 }
