@@ -19,15 +19,17 @@
 AsyncWebServer server(80);
 //DDCVCP ddc;
 portMUX_TYPE cecMux = portMUX_INITIALIZER_UNLOCKED;
-portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE historyMux = portMUX_INITIALIZER_UNLOCKED;
 std::list<std::string> history;
 uint16_t cec_physical_address;
 //volatile bool hdmi_unplugged;
-xSemaphoreHandle reply_ready_sem;
+xSemaphoreHandle request_sem;
+xSemaphoreHandle response_sem;
+xSemaphoreHandle responded_sem;
 unsigned char reply[CEC_MAX_MSG_SIZE];
 int reply_length;
 unsigned char reply_filter;
-double last_hpd_time;
+//double last_hpd_time;
 HomeTvCec device;
 
 void cec_loop(void* param);
@@ -91,12 +93,12 @@ void handle_history(AsyncWebServerRequest* request)
   auto response = new PrettyAsyncJsonResponse(true, 256);
   auto doc = response->getRoot();
 
-  portENTER_CRITICAL(&dataMux);
+  portENTER_CRITICAL(&historyMux);
   for (std::list<std::string>::iterator it = history.begin(); it != history.end(); it++)
   {
     doc.add(it->c_str());
   }
-  portEXIT_CRITICAL(&dataMux);
+  portEXIT_CRITICAL(&historyMux);
 
   response->setLength();
   request->send(response);
@@ -122,7 +124,7 @@ void handle_send(AsyncWebServerRequest* request)
   int target = request->pathArg(0).toInt();
   String cmd = request->arg("cmd");
   String reply_command = request->arg("reply");
-  Serial.println("send 1");
+  //Serial.println("send 1");
   char buffer[CEC_MAX_MSG_SIZE];
   int len = (cmd.length() + 1) / 3;
   if (len == 0 ||
@@ -161,45 +163,53 @@ void handle_send(AsyncWebServerRequest* request)
     sscanf(hex, "%02x", &reply_command_value);
   }
   //Serial.println("enter data");
-  portENTER_CRITICAL(&dataMux);
-  if (reply_command.length() == 2)
-  {
-    hex = reply_command.c_str();
-    unsigned int temp;
-    sscanf(hex, "%02x", &temp);
-    reply_length = CEC_MAX_MSG_SIZE;
-    reply_filter = (unsigned char)reply_command_value;
-  }
-  else
-  {
-    reply_length = 0;
-  }
-  portEXIT_CRITICAL(&dataMux);
-  //Serial.println("leave data, enter cec");
-  portENTER_CRITICAL(&cecMux);
-  device.TransmitFrame(target, (unsigned char*)buffer, len);
-  portEXIT_CRITICAL(&cecMux);
-  //Serial.println("leave data, leave cec");
   std::string reply_string;
   const char* reply_status = "ok";
 
-  if (reply_command_value != -1)
+  if (xSemaphoreTake(request_sem, 5000 / portTICK_PERIOD_MS))
   {
-    Serial.printf("Waiting for reply %02x\n", reply_command_value);
-    if (xSemaphoreTake(reply_ready_sem, 5000 / portTICK_PERIOD_MS))
+    //portENTER_CRITICAL(&dataMux);    
+    if (reply_command.length() == 2)
     {
-      portENTER_CRITICAL(&dataMux);
-      if (reply_length > 1)
-      {
-        format_bytes(reply_string, reply + 1, reply_length - 1);
-      }
-      portEXIT_CRITICAL(&dataMux);
-      //xSemaphoreGive(reply_ready_sem);
+      hex = reply_command.c_str();
+      unsigned int temp;
+      sscanf(hex, "%02x", &temp);
+      reply_length = CEC_MAX_MSG_SIZE;
+      reply_filter = (unsigned char)reply_command_value;
     }
     else
     {
-      reply_status = "error";
+      reply_length = 0;
     }
+    xSemaphoreTake(responded_sem, portMAX_DELAY);
+    xSemaphoreGive(response_sem);
+    //portEXIT_CRITICAL(&dataMux);
+    //Serial.println("leave data, enter cec");
+    portENTER_CRITICAL(&cecMux);
+    device.TransmitFrame(target, (unsigned char*)buffer, len);
+    portEXIT_CRITICAL(&cecMux);
+    //Serial.println("leave data, leave cec");
+
+    if (reply_command_value != -1)
+    {
+      Serial.printf("Waiting for reply %02x\n", reply_command_value);
+      if (xSemaphoreTake(responded_sem, 5000 / portTICK_PERIOD_MS))
+      {
+        //portENTER_CRITICAL(&dataMux);
+        if (reply_length > 1)
+        {
+          format_bytes(reply_string, reply + 1, reply_length - 1);
+        }
+        //portEXIT_CRITICAL(&dataMux);
+      }
+      else
+      {
+        reply_status = "error";
+      }
+    }
+    xSemaphoreTake(response_sem, portMAX_DELAY);
+    xSemaphoreGive(responded_sem);
+    xSemaphoreGive(request_sem);
   }
 
   auto response = new PrettyAsyncJsonResponse(false, 256);
@@ -428,7 +438,8 @@ byte readI2CByte(byte data_addr)
 
 // void IRAM_ATTR on_hdmi_unplugged()
 // {
-//   hdmi_unplugged = true;
+//   //hdmi_unplugged = true;
+//   ESP.restart();
 // }
 
 // double get_hotplug_voltage()
@@ -443,14 +454,17 @@ double uptimed()
 
 void setup()
 {
-  reply_ready_sem = xSemaphoreCreateBinary();
-  xSemaphoreTake(reply_ready_sem, 0);
-
+  digitalWrite(ONBOARD_LED, HIGH);
   pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
   pinMode(CEC_GPIO, INPUT_PULLUP);
   pinMode(ONBOARD_LED, OUTPUT);
-  digitalWrite(ONBOARD_LED, HIGH);
   delay(50);
+
+  request_sem = xSemaphoreCreateBinary();
+  response_sem = xSemaphoreCreateBinary();
+  responded_sem = xSemaphoreCreateBinary();
+  xSemaphoreGive(request_sem);
+  xSemaphoreGive(responded_sem);
 
   Serial.begin(115200);
   while (!Serial) delay(50);
@@ -462,7 +476,7 @@ void setup()
   //delay(500);
 
   Serial.printf("Hotplug signal detected!\n");
-  last_hpd_time = uptimed();
+  //last_hpd_time = uptimed();
 
   //delay(10000);
   //attachInterrupt(digitalPinToInterrupt(HOTPLUG_GPIO), on_hdmi_unplugged, FALLING);
@@ -518,32 +532,32 @@ void loop()
 {
   connect_wiFi();
 
-  double now = uptimed();
+  //double now = uptimed();
   bool hpd = digitalRead(HOTPLUG_GPIO) == HIGH;
 
   //portENTER_CRITICAL(&dataMux);
   //device.Run();
-  if (hpd)
-  {
-    last_hpd_time = now;
-  }
+  // if (hpd)
+  // {
+  //   last_hpd_time = now;
+  // }
   //hpd_time = last_hpd_time;
   //portEXIT_CRITICAL(&dataMux);
   //Serial.printf("hpd: %d\n", hpd);
   if (!hpd)
   {
-    Serial.println("HPD down");
-    while (digitalRead(HOTPLUG_GPIO) == LOW)
-    {
-      delay(50);
-      if (uptimed() - last_hpd_time > 2.5)
-      {
-        Serial.println("HDMI unplugged, rebooting in 2.5s...");
-        delay(2500);
-        ESP.restart();
-      }
-    }
-    Serial.printf("HPD down for %.5fs\n", uptimed() - last_hpd_time);
+    // Serial.println("HPD down");
+    // while (digitalRead(HOTPLUG_GPIO) == LOW)
+    // {
+    //   delay(50);
+    //   if (uptimed() - last_hpd_time > 2.5)
+    //   {
+    Serial.println("HDMI unplugged, rebooting in 1s...");
+    delay(1000);
+    ESP.restart();
+    //   }
+    // }
+    // Serial.printf("HPD down for %.5fs\n", uptimed() - last_hpd_time);
 
     // unsigned long start = millis();
 
@@ -562,7 +576,7 @@ void loop()
     // ESP.restart();
     //}
   }
-  delay(100);
+  delay(1000);
 }
 
 void cec_loop(void* param)

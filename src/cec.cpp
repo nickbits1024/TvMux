@@ -8,8 +8,9 @@
 extern std::list<std::string> history;
 extern uint16_t cec_physical_address;
 extern portMUX_TYPE cecMux;
-extern portMUX_TYPE dataMux;
-extern xSemaphoreHandle reply_ready_sem;
+extern portMUX_TYPE historyMux;
+extern xSemaphoreHandle response_sem;
+extern xSemaphoreHandle responded_sem;
 extern unsigned char reply[CEC_MAX_MSG_SIZE];
 extern int reply_length;
 extern unsigned char reply_filter;
@@ -39,7 +40,7 @@ void HomeTvCec::SetLineState(bool state)
   }
   // give enough time for the line to settle before sampling it
   //delayMicroseconds(50);
-  delayMicroseconds(5);
+  delayMicroseconds(10);
 }
 
 void HomeTvCec::OnReady(int logicalAddress)
@@ -118,13 +119,13 @@ void add_history(const char* prefix, unsigned char* buffer, int count, bool ack)
 
   Serial.println(s.c_str());
 
-  portENTER_CRITICAL(&dataMux);
+  portENTER_CRITICAL(&historyMux);
   history.push_front(s);
   if (history.size() > CEC_MAX_HISTORY)
   {
     history.pop_back();
   }
-  portEXIT_CRITICAL(&dataMux);
+  portEXIT_CRITICAL(&historyMux);
 }
 
 void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
@@ -139,17 +140,21 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
   if ((buffer[0] & 0xf) != LogicalAddress())
     return;
 
-  portENTER_CRITICAL(&dataMux);
-  if (reply_length != 0)
+  //portENTER_CRITICAL(&dataMux);
+  if (xSemaphoreTake(response_sem, 0))
   {
-    if (buffer[1] == reply_filter && count <= CEC_MAX_MSG_SIZE)
+    if (reply_length != 0)
     {
-      memcpy(reply, buffer, count);
-      reply_length = count;
-      xSemaphoreGive(reply_ready_sem);
+      if (buffer[1] == reply_filter && count <= CEC_MAX_MSG_SIZE)
+      {
+        memcpy(reply, buffer, count);
+        reply_length = count;
+        xSemaphoreGive(responded_sem);
+      }
     }
+    xSemaphoreGive(response_sem);
   }
-  portEXIT_CRITICAL(&dataMux);
+  //portEXIT_CRITICAL(&dataMux);
   portENTER_CRITICAL(&cecMux);
   switch (buffer[1])
   {
