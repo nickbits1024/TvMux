@@ -18,7 +18,8 @@
 
 AsyncWebServer server(80);
 //DDCVCP ddc;
-portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE cecMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 std::list<std::string> history;
 uint16_t cec_physical_address;
 //volatile bool hdmi_unplugged;
@@ -28,6 +29,8 @@ int reply_length;
 unsigned char reply_filter;
 double last_hpd_time;
 HomeTvCec device;
+
+void cec_loop(void* param);
 
 void connect_wiFi()
 {
@@ -88,12 +91,12 @@ void handle_history(AsyncWebServerRequest* request)
   auto response = new PrettyAsyncJsonResponse(true, 256);
   auto doc = response->getRoot();
 
-  portENTER_CRITICAL(&mux);
+  portENTER_CRITICAL(&dataMux);
   for (std::list<std::string>::iterator it = history.begin(); it != history.end(); it++)
   {
     doc.add(it->c_str());
   }
-  portEXIT_CRITICAL(&mux);
+  portEXIT_CRITICAL(&dataMux);
 
   response->setLength();
   request->send(response);
@@ -101,12 +104,12 @@ void handle_history(AsyncWebServerRequest* request)
 
 void handle_standby(AsyncWebServerRequest* request)
 {
-  portENTER_CRITICAL(&mux);
+  portENTER_CRITICAL(&cecMux);
   char buffer[1];
 
   buffer[0] = 0x36;
   device.TransmitFrame(0xf, (unsigned char*)buffer, 1);
-  portEXIT_CRITICAL(&mux);
+  portEXIT_CRITICAL(&cecMux);
 
   auto response = new PrettyAsyncJsonResponse(false, 16);
 
@@ -119,7 +122,7 @@ void handle_send(AsyncWebServerRequest* request)
   int target = request->pathArg(0).toInt();
   String cmd = request->arg("cmd");
   String reply_command = request->arg("reply");
-
+  Serial.println("send 1");
   char buffer[CEC_MAX_MSG_SIZE];
   int len = (cmd.length() + 1) / 3;
   if (len == 0 ||
@@ -157,8 +160,8 @@ void handle_send(AsyncWebServerRequest* request)
     hex = reply_command.c_str();
     sscanf(hex, "%02x", &reply_command_value);
   }
-
-  portENTER_CRITICAL(&mux);
+  //Serial.println("enter data");
+  portENTER_CRITICAL(&dataMux);
   if (reply_command.length() == 2)
   {
     hex = reply_command.c_str();
@@ -171,10 +174,12 @@ void handle_send(AsyncWebServerRequest* request)
   {
     reply_length = 0;
   }
-
+  portEXIT_CRITICAL(&dataMux);
+  //Serial.println("leave data, enter cec");
+  portENTER_CRITICAL(&cecMux);
   device.TransmitFrame(target, (unsigned char*)buffer, len);
-  portEXIT_CRITICAL(&mux);
-
+  portEXIT_CRITICAL(&cecMux);
+  //Serial.println("leave data, leave cec");
   std::string reply_string;
   const char* reply_status = "ok";
 
@@ -183,11 +188,12 @@ void handle_send(AsyncWebServerRequest* request)
     Serial.printf("Waiting for reply %02x\n", reply_command_value);
     if (xSemaphoreTake(reply_ready_sem, 5000 / portTICK_PERIOD_MS))
     {
+      portENTER_CRITICAL(&dataMux);
       if (reply_length > 1)
       {
         format_bytes(reply_string, reply + 1, reply_length - 1);
       }
-
+      portEXIT_CRITICAL(&dataMux);
       //xSemaphoreGive(reply_ready_sem);
     }
     else
@@ -256,11 +262,11 @@ void handle_transmit(AsyncWebServerRequest* request)
   }
   Serial.printf("reconstructed: %s\n", temp.c_str());
 
-  portENTER_CRITICAL(&mux);
+  portENTER_CRITICAL(&cecMux);
 
   device.TransmitFrame(target, (unsigned char*)buffer, len);
 
-  portEXIT_CRITICAL(&mux);
+  portEXIT_CRITICAL(&cecMux);
 
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
@@ -306,7 +312,7 @@ bool parse_edid(unsigned char* edid)
 
   uint8_t version = edid[0x12];
   uint8_t revision = edid[0x13];
-  uint8_t extension_flag = edid[EDID_EXTENSION_FLAG];
+  //uint8_t extension_flag = edid[EDID_EXTENSION_FLAG];
 
   Serial.printf("EDID version: %u.%u\n", version, revision);
   Serial.printf("EDID manufacturer: %s\n", manufacturer);
@@ -346,7 +352,7 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
   //Serial.printf("EDID ext checksum: %08x\n", sum);
 
   uint8_t tag = ext[0];
-  uint8_t revision = ext[1];
+  //uint8_t revision = ext[1];
   uint8_t dtd_offset = ext[2];
   uint8_t offset = 4;
 
@@ -435,17 +441,6 @@ double uptimed()
   return esp_timer_get_time() / 1000000.0;
 }
 
-void cec_loop(void* param)
-{
-  while (1)
-  {
-    portENTER_CRITICAL(&mux);
-    device.Run();
-    portEXIT_CRITICAL(&mux);
-    yield();
-  }
-}
-
 void setup()
 {
   reply_ready_sem = xSemaphoreCreateBinary();
@@ -461,7 +456,7 @@ void setup()
   while (!Serial) delay(50);
 
   Serial.println("Waiting for hotplug signal...");
-  while (digitalRead(HOTPLUG_GPIO) == HIGH) delay(50);
+  while (digitalRead(HOTPLUG_GPIO) == LOW) delay(50);
   //double hpv = 0;
   //while ((hpv = get_hotplug_voltage()) < HOTPLUG_LOW_VOLTAGE) delay(50);
   //delay(500);
@@ -501,7 +496,7 @@ void setup()
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-  //xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 5, NULL);
+  xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
 
   BLEDevice::init("TvHdmiCec");
 
@@ -523,31 +518,36 @@ void loop()
 {
   connect_wiFi();
 
-  double hpd_time;
   double now = uptimed();
-  bool hpd = digitalRead(HOTPLUG_GPIO) == LOW;
+  bool hpd = digitalRead(HOTPLUG_GPIO) == HIGH;
 
-  portENTER_CRITICAL(&mux);
-  device.Run();
+  //portENTER_CRITICAL(&dataMux);
+  //device.Run();
   if (hpd)
   {
     last_hpd_time = now;
   }
-  hpd_time = last_hpd_time;
-  portEXIT_CRITICAL(&mux);
+  //hpd_time = last_hpd_time;
+  //portEXIT_CRITICAL(&dataMux);
   //Serial.printf("hpd: %d\n", hpd);
   if (!hpd)
   {
     Serial.println("HPD down");
-    while (digitalRead(HOTPLUG_GPIO) == HIGH)
+    while (digitalRead(HOTPLUG_GPIO) == LOW)
     {
-      yield();
+      delay(50);
+      if (uptimed() - last_hpd_time > 2.5)
+      {
+        Serial.println("HDMI unplugged, rebooting in 2.5s...");
+        delay(2500);
+        ESP.restart();
+      }
     }
-    Serial.printf("HPD down for %.5fs\n", uptimed() - hpd_time);
+    Serial.printf("HPD down for %.5fs\n", uptimed() - last_hpd_time);
 
     // unsigned long start = millis();
 
-    delay(100);
+    //delay(100);
     // //unsigned long end = start;
     // while (digitalRead(HOTP.LUG_GPIO) == LOW && (millis() - start) < 5000)
     // {
@@ -562,5 +562,18 @@ void loop()
     // ESP.restart();
     //}
   }
-  //delay(1000);
+  delay(100);
+}
+
+void cec_loop(void* param)
+{
+  while (1)
+  {
+    portENTER_CRITICAL(&cecMux);
+    device.Run();
+    portEXIT_CRITICAL(&cecMux);
+    //yield();
+    //delayMicroseconds(50);
+    //delay(50);
+  }
 }
