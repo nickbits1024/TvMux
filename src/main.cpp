@@ -456,7 +456,9 @@ void setup()
 {
   digitalWrite(ONBOARD_LED, HIGH);
   pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
-  pinMode(CEC_GPIO, INPUT_PULLUP);
+  pinMode(CEC_GPIO_INPUT, INPUT_PULLUP);
+  pinMode(CEC_GPIO_OUTPUT, OUTPUT_OPEN_DRAIN);
+  digitalWrite(CEC_GPIO_OUTPUT, HIGH);
   pinMode(ONBOARD_LED, OUTPUT);
   delay(50);
 

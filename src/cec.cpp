@@ -23,7 +23,7 @@ HomeTvCec::HomeTvCec()
 
 bool HomeTvCec::LineState()
 {
-  int state = digitalRead(CEC_GPIO);
+  int state = digitalRead(CEC_GPIO_INPUT);
   return state != LOW;
 }
 
@@ -31,16 +31,17 @@ void HomeTvCec::SetLineState(bool state)
 {
   if (state)
   {
-    pinMode(CEC_GPIO, INPUT_PULLUP);
+    //pinMode(CEC_GPIO, INPUT_PULLUP);
+    digitalWrite(CEC_GPIO_OUTPUT, HIGH);
   }
   else
   {
-    digitalWrite(CEC_GPIO, LOW);
-    pinMode(CEC_GPIO, OUTPUT);
+    //digitalWrite(CEC_GPIO, LOW);
+    //pinMode(CEC_GPIO, OUTPUT);
+    digitalWrite(CEC_GPIO_OUTPUT, LOW);
   }
   // give enough time for the line to settle before sampling it
-  //delayMicroseconds(50);
-  delayMicroseconds(10);
+  delayMicroseconds(16);
 }
 
 void HomeTvCec::OnReady(int logicalAddress)
