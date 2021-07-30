@@ -1,14 +1,17 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <BLEDevice.h>
 #include <AsyncJson.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <ESPAsyncWebServer.h>
+#include "cJSON.h"
 #include <list>
 #include "cec.h"
+#include "wii.h"
 
-#define WIFI_SSID             "ac55.wifi.nickpalmer.net"
+//#define HDMI_CEC
+
+#define WIFI_SSID             "wifi.nickpalmer.net"
 #define WIFI_PASS             "B16b00b5"
 #define ONBOARD_LED           2
 
@@ -17,7 +20,6 @@
 //#define HOTPLUG_LOW_VOLTAGE   0.4
 
 AsyncWebServer server(80);
-//DDCVCP ddc;
 portMUX_TYPE cecMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE historyMux = portMUX_INITIALIZER_UNLOCKED;
 std::list<std::string> history;
@@ -117,6 +119,49 @@ void handle_standby(AsyncWebServerRequest* request)
 
   response->setLength();
   request->send(response);
+}
+
+void handle_wii_get(AsyncWebServerRequest* request)
+{
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+
+  doc["state"] = wii_query_power_state() ? "on" : "off";
+
+  response->setLength();
+  request->send(response);
+}
+
+void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
+{
+  printf("wii post\n");
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+
+  const JsonObject& jsonObj = json.as<JsonObject>();
+
+  bool power_toggled = false;
+  if (jsonObj.containsKey("state"))
+  {
+    if (jsonObj["state"] == "on")
+    {
+      power_toggled = wii_power_on();
+    }
+    else if (jsonObj["state"] == "off")
+    {
+      power_toggled = wii_power_off();
+    }
+  }
+  doc["power_toggled"] = power_toggled;
+
+  if (power_toggled)
+  {
+    delay(2000);
+  }
+  doc["state"] = wii_query_power_state() ? "on" : "off";
+
+  response->setLength();
+  request->send(response);  
 }
 
 void handle_send(AsyncWebServerRequest* request)
@@ -468,11 +513,17 @@ void setup()
   xSemaphoreGive(request_sem);
   xSemaphoreGive(responded_sem);
 
+// disableCore0WDT();
+// disableCore1WDT();
+// disableLoopWDT(); 
+
   Serial.begin(115200);
   while (!Serial) delay(50);
 
+#ifdef HDMI_CEC
   Serial.println("Waiting for hotplug signal...");
   while (digitalRead(HOTPLUG_GPIO) == LOW) delay(50);
+
   //double hpv = 0;
   //while ((hpv = get_hotplug_voltage()) < HOTPLUG_LOW_VOLTAGE) delay(50);
   //delay(500);
@@ -513,15 +564,18 @@ void setup()
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
   xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
+#endif
 
-  BLEDevice::init("TvHdmiCec");
+  wii_init();
 
   server.on("/heap", HTTP_GET, handle_heap);
   server.on("/history", HTTP_GET, handle_history);
   server.on("/standby", HTTP_GET, handle_standby);
+  server.on("/wii", HTTP_GET, handle_wii_get);  
   //server.on("/transmit", HTTP_GET, handle_transmit);
   server.on("^\\/device\\/([0-9]+)\\/send$", HTTP_GET, handle_send);
   server.onNotFound(handle_404);
+  server.addHandler(new AsyncCallbackJsonWebHandler("/wii", handle_wii_post));
 
   connect_wiFi();
 
@@ -534,6 +588,7 @@ void loop()
 {
   connect_wiFi();
 
+#ifdef HDMI_CEC
   //double now = uptimed();
   bool hpd = digitalRead(HOTPLUG_GPIO) == HIGH;
 
@@ -578,6 +633,7 @@ void loop()
     // ESP.restart();
     //}
   }
+#endif
   delay(1000);
 }
 
