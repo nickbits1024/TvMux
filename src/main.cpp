@@ -141,22 +141,25 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
   const JsonObject& jsonObj = json.as<JsonObject>();
 
   bool power_toggled = false;
+  int toggle_delay = 0;
   if (jsonObj.containsKey("state"))
   {
     if (jsonObj["state"] == "on")
     {
       power_toggled = wii_power_on();
+      toggle_delay = 5000;
     }
     else if (jsonObj["state"] == "off")
     {
       power_toggled = wii_power_off();
+      toggle_delay = 0;
     }
   }
   doc["power_toggled"] = power_toggled;
 
   if (power_toggled)
   {
-    delay(2000);
+    delay(toggle_delay);
   }
   doc["state"] = wii_query_power_state() ? "on" : "off";
 

@@ -10,7 +10,8 @@
 
 typedef enum
 {
-    WII_PAIRING = 1,
+    WII_ABORT = 1,
+    WII_PAIRING,
     WII_POWER_ON,
     WII_POWER_OFF,
     WII_QUERY_POWER_STATE
@@ -28,7 +29,7 @@ xSemaphoreHandle all_controller_buffers_sem;
 int all_controller_buffers_sem_count;
 bool wii_on;
 uint16_t wii_con_handle;
-uint8_t wii_on_disconnect_reason;
+uint8_t wii_disconnect_reason;
 
 void wii_packet_handler(uint8_t* packet, uint16_t size);
 void post_bt_packet(BT_PACKET_ENVELOPE* env);
@@ -155,6 +156,9 @@ void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
                     break;
                 case WII_PAIRING:
                     break;
+                case WII_ABORT:
+                    post_bt_packet(create_hci_disconnect_packet(packet->con_handle, wii_disconnect_reason));
+                    break;
             }
             break;
         case ERROR_CODE_ACL_CONNECTION_ALREADY_EXISTS:
@@ -271,9 +275,11 @@ void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
         case WII_POWER_ON:
         case WII_POWER_OFF:
             wii_on = true;
-            post_bt_packet(create_hci_disconnect_packet(packet->con_handle, wii_on_disconnect_reason));
+            post_bt_packet(create_hci_disconnect_packet(packet->con_handle, wii_disconnect_reason));
             break;
         case WII_PAIRING:
+            break;
+        case WII_ABORT:
             break;
         }
     }
@@ -463,12 +469,14 @@ bool wii_command(wii_state_t state, uint8_t on_disconnect_reason, uint8_t off_di
     wii_state = state;
     wii_on = false;
     wii_con_handle = INVALID_CON_HANDLE;
-    wii_on_disconnect_reason = on_disconnect_reason;
+    wii_disconnect_reason = on_disconnect_reason;
 
     xSemaphoreTake(wii_response_sem, 0);
     wii_connect();
     xSemaphoreTake(wii_response_sem, WII_TIMEOUT_TICKS);
     printf("wii is %s\n", wii_on ? "on" : "off");
+    wii_state = WII_ABORT;
+    wii_disconnect_reason = off_disconnect_reason;
     if (wii_con_handle != INVALID_CON_HANDLE)
     {
         post_bt_packet(create_hci_disconnect_packet(wii_con_handle, off_disconnect_reason));
