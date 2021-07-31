@@ -126,11 +126,25 @@ void handle_wii_get(AsyncWebServerRequest* request)
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
 
-  doc["state"] = wii_query_power_state() ? "on" : "off";
+  wii_power_state_t state = wii_query_power_state();
+  doc["state"] = state == WII_POWER_STATE_ON ? "on" : state == WII_POWER_STATE_OFF ? "off" : "error";
 
   response->setLength();
   request->send(response);
 }
+
+void handle_wii_pair_get(AsyncWebServerRequest* request)
+{
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+
+  wii_pair();
+  doc["status"] = "started";
+
+  response->setLength();
+  request->send(response);
+}
+
 
 void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
 {
@@ -140,28 +154,38 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
 
   const JsonObject& jsonObj = json.as<JsonObject>();
 
-  bool power_toggled = false;
+  wii_power_status_t status = WII_POWER_STATUS_UNKNOWN;
+
   int toggle_delay = 0;
   if (jsonObj.containsKey("state"))
   {
     if (jsonObj["state"] == "on")
     {
-      power_toggled = wii_power_on();
+      status = wii_power_on();
       toggle_delay = 5000;
     }
     else if (jsonObj["state"] == "off")
     {
-      power_toggled = wii_power_off();
+      status = wii_power_off();
       toggle_delay = 0;
     }
   }
-  doc["power_toggled"] = power_toggled;
+  doc["power_toggled"] = status == WII_POWER_STATUS_TOGGLED;
 
-  if (power_toggled)
+  if (status == WII_POWER_STATUS_TOGGLED)
   {
     delay(toggle_delay);
   }
-  doc["state"] = wii_query_power_state() ? "on" : "off";
+
+  if (status == WII_POWER_STATUS_ERROR)
+  {
+    doc["state"] = "error";
+  }
+  else
+  {
+    wii_power_state_t state = wii_query_power_state();
+    doc["state"] = state == WII_POWER_STATE_ON ? "on" : state == WII_POWER_STATE_OFF ? "off" : "error";
+  }
 
   response->setLength();
   request->send(response);  
@@ -574,7 +598,8 @@ void setup()
   server.on("/heap", HTTP_GET, handle_heap);
   server.on("/history", HTTP_GET, handle_history);
   server.on("/standby", HTTP_GET, handle_standby);
-  server.on("/wii", HTTP_GET, handle_wii_get);  
+  server.on("/wii/pair", HTTP_GET, handle_wii_pair_get);
+  server.on("/wii", HTTP_GET, handle_wii_get);
   //server.on("/transmit", HTTP_GET, handle_transmit);
   server.on("^\\/device\\/([0-9]+)\\/send$", HTTP_GET, handle_send);
   server.onNotFound(handle_404);
