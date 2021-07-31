@@ -6,6 +6,7 @@
 #include <ESPAsyncWebServer.h>
 #include "cJSON.h"
 #include <list>
+#include "hometv.h"
 #include "cec.h"
 #include "wii.h"
 
@@ -13,7 +14,6 @@
 
 #define WIFI_SSID             "wifi.nickpalmer.net"
 #define WIFI_PASS             "B16b00b5"
-#define ONBOARD_LED           2
 
 #define HOTPLUG_GPIO          19
 //#define HOTPLUG_ANALOG_GPIO   36
@@ -502,12 +502,12 @@ double uptimed()
 
 void setup()
 {
-  digitalWrite(ONBOARD_LED, HIGH);
+  digitalWrite(ONBOARD_LED_GPIO, HIGH);
   pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
   pinMode(CEC_GPIO_INPUT, INPUT_PULLUP);
   pinMode(CEC_GPIO_OUTPUT, OUTPUT_OPEN_DRAIN);
   digitalWrite(CEC_GPIO_OUTPUT, HIGH);
-  pinMode(ONBOARD_LED, OUTPUT);
+  pinMode(ONBOARD_LED_GPIO, OUTPUT);
   delay(50);
 
   request_sem = xSemaphoreCreateBinary();
@@ -584,7 +584,7 @@ void setup()
 
   server.begin();
 
-  digitalWrite(ONBOARD_LED, LOW);
+  digitalWrite(ONBOARD_LED_GPIO, LOW);
 }
 
 void loop()

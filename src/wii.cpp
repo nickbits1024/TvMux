@@ -6,11 +6,13 @@
 #include <esp_bt.h>
 #include "bthci.c"
 #include "btdump.c"
+#include "hometv.h"
 #include "Wii.h"
 
 typedef enum
 {
     WII_ABORT = 1,
+    WII_ERROR,
     WII_PAIRING,
     WII_POWER_ON,
     WII_POWER_OFF,
@@ -137,27 +139,24 @@ void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
             switch (wii_state)
             {
                 case WII_QUERY_POWER_STATE:
-                    open_control_channel(packet->con_handle);
-                    //xSemaphoreGive(wii_response_sem);
-                    break;
-                // case WII_CONSOLE_PAIRING_PENDING:
-                //     memcpy(wii_addr, packet->addr, BDA_SIZE);
-                //     wii_controller.state = WII_CONSOLE_PAIRING_STARTED;
-                //     break;
                 case WII_POWER_ON:
-                    //xSemaphoreGive(wii_response_sem);
-                    //printf("wii is %s\n", wii_on ? "on" : "off");
-                    open_control_channel(packet->con_handle);
-                    break;
                 case WII_POWER_OFF:
-                    printf("wii is %s\n", wii_on ? "on" : "off");
-                    //wii_state = WII_CONSOLE_POWER_OFF_CONNECTED;
-                    open_control_channel(packet->con_handle);
+                    if (wii_on) // sometimes the wii sends a role change if on, sometimes not
+                    {
+                        printf("wii is on (via role change)\n");
+                        post_bt_packet(create_hci_disconnect_packet(packet->con_handle, wii_disconnect_reason));
+                    }
+                    else
+                    {
+                        open_control_channel(packet->con_handle);
+                    }                    
                     break;
                 case WII_PAIRING:
                     break;
                 case WII_ABORT:
                     post_bt_packet(create_hci_disconnect_packet(packet->con_handle, wii_disconnect_reason));
+                    break;
+                case WII_ERROR:
                     break;
             }
             break;
@@ -165,6 +164,11 @@ void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
             vTaskDelay(500 / portTICK_PERIOD_MS);
             printf("retrying connection...\n");
             wii_connect();
+            break;
+        default:
+            wii_state = WII_ERROR;
+            digitalWrite(ONBOARD_LED_GPIO, LOW);
+            xSemaphoreGive(wii_response_sem);
             break;
     }
 }
@@ -281,6 +285,8 @@ void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
             break;
         case WII_ABORT:
             break;
+        case WII_ERROR:
+            break;
         }
     }
 }
@@ -300,6 +306,7 @@ void handle_l2cap_signal_channel(L2CAP_SIGNAL_CHANNEL_PACKET* packet)
 
 void handle_disconnection_complete(HCI_DISCONNECTION_COMPLETE_EVENT_PACKET* packet)
 {
+    digitalWrite(ONBOARD_LED_GPIO, LOW);
     wii_con_handle = INVALID_CON_HANDLE;
     xSemaphoreGive(wii_response_sem);
 }
@@ -461,6 +468,7 @@ void wii_connect()
         printf("can't connect to wii--addr not set\n");
         return;
     }
+    digitalWrite(ONBOARD_LED_GPIO, HIGH);
     post_bt_packet(create_hci_create_connection_packet(wii_addr, WII_PACKET_TYPES, 1, true, 0, 1));
 }
 

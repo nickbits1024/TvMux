@@ -30,6 +30,7 @@ void wii_init();
 bool wii_query_power_state();
 bool wii_power_on();
 bool wii_power_off();
+void wii_start_pairing();
 }
 
 #endif
