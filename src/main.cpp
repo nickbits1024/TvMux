@@ -169,14 +169,16 @@ void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
   {
     if (jsonObj["state"] == "on")
     {
+      printf("turn tv on\n");
       portENTER_CRITICAL(&cecMux);
       device.TvScreenOn();
-      device.SystemAudioModeRequest(0x5200);
-      device.SetSystemAudioMode(true);
+      device.SystemAudioModeRequest(0x4100);
+      //device.SetSystemAudioMode(true);
       portEXIT_CRITICAL(&cecMux);
     }
     else if (jsonObj["state"] == "off")
     {
+      printf("turn tv off\n");
       portENTER_CRITICAL(&cecMux);
       device.StandBy();
       portEXIT_CRITICAL(&cecMux);
@@ -237,7 +239,7 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
   }
 
   response->setLength();
-  request->send(response);  
+  request->send(response);
 }
 
 void handle_send(AsyncWebServerRequest* request)
@@ -514,7 +516,7 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext)
 
     switch (tag)
     {
-    case 3:
+      case 3:
       {
         uint8_t ieee[3];
         ieee[0] = p[3];
@@ -583,7 +585,7 @@ void setup()
   digitalWrite(ONBOARD_LED_GPIO, HIGH);
   pinMode(WII_PAIR_GPIO, INPUT_PULLUP);
   pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
-  pinMode(CEC_GPIO_INPUT, INPUT_PULLUP);
+  pinMode(CEC_GPIO_INPUT, INPUT);
   pinMode(CEC_GPIO_OUTPUT, OUTPUT_OPEN_DRAIN);
   digitalWrite(CEC_GPIO_OUTPUT, HIGH);
   pinMode(ONBOARD_LED_GPIO, OUTPUT);
@@ -592,8 +594,8 @@ void setup()
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
   {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      err = nvs_flash_init();
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
   }
 
   err = nvs_open("default", NVS_READWRITE, &config_nvs_handle);
@@ -605,9 +607,9 @@ void setup()
   xSemaphoreGive(request_sem);
   xSemaphoreGive(responded_sem);
 
-// disableCore0WDT();
-// disableCore1WDT();
-// disableLoopWDT(); 
+  // disableCore0WDT();
+  // disableCore1WDT();
+  // disableLoopWDT(); 
 
   Serial.begin(921600);
   while (!Serial) delay(50);
@@ -658,7 +660,7 @@ void setup()
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-  xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 2, NULL);
+  xTaskCreatePinnedToCore(cec_loop, "cec_loop", 10000, NULL, 1, NULL, 1);
 #endif
 
   wii_init();
@@ -687,49 +689,13 @@ void loop()
   connect_wiFi();
 
 #ifdef HDMI_CEC
-  //double now = uptimed();
   bool hpd = digitalRead(HOTPLUG_GPIO) == HIGH;
 
-  //portENTER_CRITICAL(&dataMux);
-  //device.Run();
-  // if (hpd)
-  // {
-  //   last_hpd_time = now;
-  // }
-  //hpd_time = last_hpd_time;
-  //portEXIT_CRITICAL(&dataMux);
-  //Serial.printf("hpd: %d\n", hpd);
   if (!hpd)
   {
-    // Serial.println("HPD down");
-    // while (digitalRead(HOTPLUG_GPIO) == LOW)
-    // {
-    //   delay(50);
-    //   if (uptimed() - last_hpd_time > 2.5)
-    //   {
     Serial.println("HDMI unplugged, rebooting in 1s...");
     delay(1000);
     ESP.restart();
-    //   }
-    // }
-    // Serial.printf("HPD down for %.5fs\n", uptimed() - last_hpd_time);
-
-    // unsigned long start = millis();
-
-    //delay(100);
-    // //unsigned long end = start;
-    // while (digitalRead(HOTP.LUG_GPIO) == LOW && (millis() - start) < 5000)
-    // {
-    // }
-    // unsigned long t = millis() - start;
-    // if (t >= 5000)
-    // {
-
-    //double v = analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
-    // Serial.printf("HDMI unplugged, rebooting in 5s (h=%d, v=%.2fV)...\n", hph, hpv);
-    // delay(5000);
-    // ESP.restart();
-    //}
   }
 #endif
   if (wii_pair_request)
@@ -745,20 +711,8 @@ void cec_loop(void* param)
 {
   while (1)
   {
-    bool activity = digitalRead(CEC_GPIO_INPUT) == LOW;
-    double now = uptimed();
     portENTER_CRITICAL(&cecMux);
-    do 
-    {      
-      device.Run();
-      
-      bool more_activity = digitalRead(CEC_GPIO_INPUT) == LOW;
-      if (more_activity)
-      {
-        now = uptimed();
-      }
-    }
-    while (activity && uptimed() - now < 1.0);
+    device.Run();
     portEXIT_CRITICAL(&cecMux);
   }
 }

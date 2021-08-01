@@ -22,6 +22,7 @@ protected:
   virtual void OnReady(int logicalAddress);
   virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
   virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
+  void TransmitFrameNow(int targetAddress, const unsigned char* buffer, int count);
 
 public:
   HomeTvCec();
