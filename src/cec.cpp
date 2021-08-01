@@ -7,7 +7,7 @@
 
 extern std::list<std::string> history;
 extern uint16_t cec_physical_address;
-extern portMUX_TYPE cecMux;
+//extern portMUX_TYPE cecMux;
 extern portMUX_TYPE historyMux;
 extern xSemaphoreHandle response_sem;
 extern xSemaphoreHandle responded_sem;
@@ -16,9 +16,11 @@ extern int reply_length;
 extern unsigned char reply_filter;
 
 
-HomeTvCec::HomeTvCec()
+HomeTvCec::HomeTvCec()  :
+  pendingMessage(NULL)
 {
-
+  
+  this->queueHandle = xQueueCreate(100, sizeof(CEC_MESSAGE*));
 }
 
 bool HomeTvCec::LineState()
@@ -156,7 +158,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
     xSemaphoreGive(response_sem);
   }
   //portEXIT_CRITICAL(&dataMux);
-  portENTER_CRITICAL(&cecMux);
+  //portENTER_CRITICAL(&cecMux);
   switch (buffer[1])
   {
   case 0x83:
@@ -176,7 +178,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
     TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
     break;
   }
-  portEXIT_CRITICAL(&cecMux);
+  //portEXIT_CRITICAL(&cecMux);
 }
 
 void HomeTvCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
@@ -192,39 +194,66 @@ void HomeTvCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
   add_history("tx", buffer, count, ack);
 }
 
-void HomeTvCec::TransmitFrameNow(int targetAddress, const unsigned char* buffer, int count)
+void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, int count)
 {
-  while (!TransmitFrame(targetAddress, buffer, count));
+  CEC_MESSAGE* msg = new CEC_MESSAGE;
+  msg->targetAddress = targetAddress;
+  msg->size = count;
+  memcpy(msg->data, buffer, count);
+  xQueueSend(this->queueHandle, &msg, portMAX_DELAY);
+}
+
+void HomeTvCec::Run()
+{
+  if (this->pendingMessage == NULL)
+  {
+    CEC_MESSAGE* msg;
+    if (xQueueReceive(this->queueHandle, &msg, 0) == pdTRUE)
+    {
+      this->pendingMessage = msg;
+    }
+  }
+
+  if (this->pendingMessage != NULL)
+  {
+    if (CEC_Device::TransmitFrame(this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size))
+    {
+      delete this->pendingMessage;
+      this->pendingMessage = NULL;
+    }
+  }
+
+  CEC_Device::Run();
 }
 
 void HomeTvCec::StandBy()
 {
   uint8_t cmd[] = { 0x36 };
 
-  TransmitFrameNow(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd));
+  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd));
 }
 
 void HomeTvCec::TvScreenOn()
 {
   uint8_t cmd[] = { 0x04 };
 
-  TransmitFrameNow(0, cmd, sizeof(cmd));
+  TransmitFrame(0, cmd, sizeof(cmd));
 }
 
 void HomeTvCec::SetSystemAudioMode(bool on)
 {
   uint8_t cmd[] = { 0x04, (uint8_t)(on ? 0x01 : 0x00) };
-  TransmitFrameNow(0, cmd, sizeof(cmd));
+  TransmitFrame(0, cmd, sizeof(cmd));
 }
 
 void HomeTvCec::SystemAudioModeRequest(uint16_t addr)
 {
   uint8_t cmd[] = { 0x70, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
-  TransmitFrameNow(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
+  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
 }
 
 void HomeTvCec::SetActiveSource(uint16_t addr)
 {
   uint8_t cmd[] = { 0x82, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
-  TransmitFrameNow(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
+  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
 }

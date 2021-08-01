@@ -1,5 +1,6 @@
 #ifndef CEC_H
 #define CEC_H
+#include "freertos/queue.h"
 #include "CEC_Device.h"
 
 #define CEC_GPIO_INPUT        5
@@ -14,18 +15,31 @@
 #define EDID_EXTENSION_DATA_LENGTH  125
 #define EDID_EXTENSION_FLAG   0x7e
 
+struct CEC_MESSAGE
+{
+  int targetAddress;
+  int size;
+  uint8_t data[CEC_MAX_MSG_SIZE];
+};
+
 class HomeTvCec : public CEC_Device
 {
+private:
+  xQueueHandle queueHandle;
+  CEC_MESSAGE* pendingMessage;
+
 protected:
   virtual bool LineState();
   virtual void SetLineState(bool);
   virtual void OnReady(int logicalAddress);
   virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
   virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
-  void TransmitFrameNow(int targetAddress, const unsigned char* buffer, int count);
 
 public:
   HomeTvCec();
+
+  void TransmitFrame(int targetAddress, const unsigned char* buffer, int count);
+  void Run();
 
   void StandBy();
   void TvScreenOn();

@@ -21,7 +21,7 @@
 //#define HOTPLUG_LOW_VOLTAGE   0.4
 
 AsyncWebServer server(80);
-portMUX_TYPE cecMux = portMUX_INITIALIZER_UNLOCKED;
+//portMUX_TYPE cecMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE historyMux = portMUX_INITIALIZER_UNLOCKED;
 std::list<std::string> history;
 uint16_t cec_physical_address;
@@ -111,9 +111,9 @@ void handle_history(AsyncWebServerRequest* request)
 
 void handle_standby(AsyncWebServerRequest* request)
 {
-  portENTER_CRITICAL(&cecMux);
+  //portENTER_CRITICAL(&cecMux);
   device.StandBy();
-  portEXIT_CRITICAL(&cecMux);
+  //portEXIT_CRITICAL(&cecMux);
 
   auto response = new PrettyAsyncJsonResponse(false, 16);
   auto doc = response->getRoot();
@@ -170,18 +170,18 @@ void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
     if (jsonObj["state"] == "on")
     {
       printf("turn tv on\n");
-      portENTER_CRITICAL(&cecMux);
+      //portENTER_CRITICAL(&cecMux);
       device.TvScreenOn();
       device.SystemAudioModeRequest(0x4100);
       //device.SetSystemAudioMode(true);
-      portEXIT_CRITICAL(&cecMux);
+      //portEXIT_CRITICAL(&cecMux);
     }
     else if (jsonObj["state"] == "off")
     {
       printf("turn tv off\n");
-      portENTER_CRITICAL(&cecMux);
+      //portENTER_CRITICAL(&cecMux);
       device.StandBy();
-      portEXIT_CRITICAL(&cecMux);
+      //portEXIT_CRITICAL(&cecMux);
     }
   }
   doc["status"] = "ok";
@@ -204,19 +204,19 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
     if (jsonObj["state"] == "on")
     {
       status = wii_power_on();
-      portENTER_CRITICAL(&cecMux);
+      //portENTER_CRITICAL(&cecMux);
       device.TvScreenOn();
       device.SystemAudioModeRequest(0x4200);
       device.SetSystemAudioMode(true);
-      portEXIT_CRITICAL(&cecMux);
+      //portEXIT_CRITICAL(&cecMux);
       toggle_delay = 5000;
     }
     else if (jsonObj["state"] == "off")
     {
       status = wii_power_off();
-      portENTER_CRITICAL(&cecMux);
+      //portENTER_CRITICAL(&cecMux);
       device.StandBy();
-      portEXIT_CRITICAL(&cecMux);
+      //portEXIT_CRITICAL(&cecMux);
       toggle_delay = 0;
     }
   }
@@ -308,9 +308,9 @@ void handle_send(AsyncWebServerRequest* request)
     xSemaphoreGive(response_sem);
     //portEXIT_CRITICAL(&dataMux);
     //Serial.println("leave data, enter cec");
-    portENTER_CRITICAL(&cecMux);
+    //portENTER_CRITICAL(&cecMux);
     device.TransmitFrame(target, (unsigned char*)buffer, len);
-    portEXIT_CRITICAL(&cecMux);
+    //portEXIT_CRITICAL(&cecMux);
     //Serial.println("leave data, leave cec");
 
     if (reply_command_value != -1)
@@ -395,11 +395,11 @@ void handle_transmit(AsyncWebServerRequest* request)
   }
   Serial.printf("reconstructed: %s\n", temp.c_str());
 
-  portENTER_CRITICAL(&cecMux);
+  //portENTER_CRITICAL(&cecMux);
 
   device.TransmitFrame(target, (unsigned char*)buffer, len);
 
-  portEXIT_CRITICAL(&cecMux);
+  //portEXIT_CRITICAL(&cecMux);
 
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
@@ -660,7 +660,7 @@ void setup()
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-  xTaskCreatePinnedToCore(cec_loop, "cec_loop", 10000, NULL, 1, NULL, 1);
+  xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
 #endif
 
   wii_init();
@@ -711,8 +711,8 @@ void cec_loop(void* param)
 {
   while (1)
   {
-    portENTER_CRITICAL(&cecMux);
+    //portENTER_CRITICAL(&cecMux);
     device.Run();
-    portEXIT_CRITICAL(&cecMux);
+    //portEXIT_CRITICAL(&cecMux);
   }
 }
