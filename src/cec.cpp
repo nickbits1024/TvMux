@@ -162,11 +162,11 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
   case 0x83:
     { // <Give Physical Address>
       //unsigned char buf[4] = { 0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE };
-      unsigned char buf[4] =
+      uint8_t buf[4] =
       {
         0x84,
-        (unsigned char)(cec_physical_address >> 8),
-        (unsigned char)(cec_physical_address & 0xff),
+        (uint8_t)(cec_physical_address >> 8),
+        (uint8_t)(cec_physical_address & 0xff),
         CEC_DEVICE_TYPE
       };
       TransmitFrame(0xf, buf, 4); // <Report Physical Address>
@@ -190,4 +190,36 @@ void HomeTvCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
   // DbgPrint("\n");
 
   add_history("tx", buffer, count, ack);
+}
+
+void HomeTvCec::StandBy()
+{
+  uint8_t cmd[] = { 0x36 };
+
+  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd));
+}
+
+void HomeTvCec::TvScreenOn()
+{
+  uint8_t cmd[] = { 0x04 };
+
+  TransmitFrame(0, cmd, sizeof(cmd));
+}
+
+void HomeTvCec::SetSystemAudioMode(bool on)
+{
+  uint8_t cmd[] = { 0x04, (uint8_t)(on ? 0x01 : 0x00) };
+  TransmitFrame(0, cmd, sizeof(cmd));
+}
+
+void HomeTvCec::SystemAudioModeRequest(uint16_t addr)
+{
+  uint8_t cmd[] = { 0x70, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
+  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
+}
+
+void HomeTvCec::SetActiveSource(uint16_t addr)
+{
+  uint8_t cmd[] = { 0x82, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
+  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
 }

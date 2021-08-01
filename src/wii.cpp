@@ -24,7 +24,6 @@ typedef enum
 volatile wii_state_t wii_state;
 
 xSemaphoreHandle wii_response_sem;
-nvs_handle wii_nvs_handle;
 bd_addr_t device_addr;
 bd_addr_t wii_addr;
 xSemaphoreHandle output_queue_ready_sem;
@@ -131,6 +130,7 @@ void pairing_task(void* p)
     if (wii_state == WII_PAIRING_PENDING)
     {
         printf("pairing incomplete\n");
+        wii_state = WII_IDLE;
     }
 
     post_bt_packet(create_hci_write_scan_enable_packet(0));
@@ -272,7 +272,7 @@ void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
         {
             uint8_t link_key[HCI_LINK_KEY_SIZE];
             size_t size = HCI_LINK_KEY_SIZE;
-            esp_err_t err = nvs_get_blob(wii_nvs_handle, LINK_KEY_BLOB_NAME, link_key, &size);
+            esp_err_t err = nvs_get_blob(config_nvs_handle, LINK_KEY_BLOB_NAME, link_key, &size);
             if (err == ESP_OK && size == HCI_LINK_KEY_SIZE)
             {
                 printf("returning stored link key");
@@ -290,7 +290,7 @@ void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
 
 void handle_link_key_notification(HCI_LINK_KEY_NOTIFICATION_EVENT_PACKET* packet)
 {
-    esp_err_t err = nvs_set_blob(wii_nvs_handle, LINK_KEY_BLOB_NAME, packet->link_key, HCI_LINK_KEY_SIZE);
+    esp_err_t err = nvs_set_blob(config_nvs_handle, LINK_KEY_BLOB_NAME, packet->link_key, HCI_LINK_KEY_SIZE);
     ESP_ERROR_CHECK(err);
 }
 
@@ -523,7 +523,7 @@ void handle_authentication_complete(HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET* pa
             if (packet->status == ERROR_CODE_SUCCESS)
             {
                 printf("storing wii address %s\n", bda_to_string(wii_addr));
-                nvs_set_blob(wii_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, BDA_SIZE);
+                nvs_set_blob(config_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, BDA_SIZE);
             }
             break;
         default:
@@ -785,19 +785,9 @@ void post_bt_packet(BT_PACKET_ENVELOPE* env)
 
 void wii_init()
 {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-
-    err = nvs_open("default", NVS_READWRITE, &wii_nvs_handle);
-    ESP_ERROR_CHECK(err);
-
     size_t size = BDA_SIZE;
-    esp_err_t ret = nvs_get_blob(wii_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, &size);
-    if (ret == ESP_OK && size == BDA_SIZE)
+    esp_err_t err = nvs_get_blob(config_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, &size);
+    if (err == ESP_OK && size == BDA_SIZE)
     {
         printf("wii addr %s\n", bda_to_string(wii_addr));
     }
@@ -916,6 +906,10 @@ wii_power_status_t wii_power_off()
 
 void wii_pair()
 {
+    if (wii_state == WII_PAIRING_PENDING || wii_state == WII_PAIRING)
+    {
+        return;
+    }
     if (pairing_task_handle != NULL)
     {
         vTaskDelete(pairing_task_handle);

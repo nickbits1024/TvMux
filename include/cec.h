@@ -7,6 +7,7 @@
 #define CEC_DEVICE_TYPE       CEC_Device::CDT_PLAYBACK_DEVICE
 #define CEC_MAX_MSG_SIZE      16
 #define CEC_MAX_HISTORY       64
+#define CEC_BROADCAST_ADDRESS 0xf
 #define EDID_ADDRESS          0x50
 #define EDID_LENGTH           128
 #define EDID_EXTENSION_LENGTH 128
@@ -24,6 +25,12 @@ protected:
 
 public:
   HomeTvCec();
+
+  void StandBy();
+  void TvScreenOn();
+  void SetSystemAudioMode(bool on);
+  void SetActiveSource(uint16_t addr);
+  void SystemAudioModeRequest(uint16_t addr);
 };
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count);

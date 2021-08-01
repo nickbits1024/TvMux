@@ -3,6 +3,7 @@
 #include <AsyncJson.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <nvs_flash.h>
 #include <ESPAsyncWebServer.h>
 #include "cJSON.h"
 #include <list>
@@ -10,7 +11,7 @@
 #include "cec.h"
 #include "wii.h"
 
-//#define HDMI_CEC
+#define HDMI_CEC
 
 #define WIFI_SSID             "wifi.nickpalmer.net"
 #define WIFI_PASS             "B16b00b5"
@@ -33,6 +34,8 @@ int reply_length;
 unsigned char reply_filter;
 //double last_hpd_time;
 HomeTvCec device;
+bool wii_pair_request;
+nvs_handle config_nvs_handle;
 
 void cec_loop(void* param);
 
@@ -109,13 +112,24 @@ void handle_history(AsyncWebServerRequest* request)
 void handle_standby(AsyncWebServerRequest* request)
 {
   portENTER_CRITICAL(&cecMux);
-  char buffer[1];
-
-  buffer[0] = 0x36;
-  device.TransmitFrame(0xf, (unsigned char*)buffer, 1);
+  device.StandBy();
   portEXIT_CRITICAL(&cecMux);
 
   auto response = new PrettyAsyncJsonResponse(false, 16);
+  auto doc = response->getRoot();
+
+  doc["status"] = "ok";
+
+  response->setLength();
+  request->send(response);
+}
+
+void handle_tv_get(AsyncWebServerRequest* request)
+{
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+
+  doc["status"] = "ok";
 
   response->setLength();
   request->send(response);
@@ -145,13 +159,39 @@ void handle_wii_pair_get(AsyncWebServerRequest* request)
   request->send(response);
 }
 
+void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
+{
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+  const JsonObject& jsonObj = json.as<JsonObject>();
+
+  if (jsonObj.containsKey("state"))
+  {
+    if (jsonObj["state"] == "on")
+    {
+      portENTER_CRITICAL(&cecMux);
+      device.TvScreenOn();
+      device.SystemAudioModeRequest(0x5200);
+      device.SetSystemAudioMode(true);
+      portEXIT_CRITICAL(&cecMux);
+    }
+    else if (jsonObj["state"] == "off")
+    {
+      portENTER_CRITICAL(&cecMux);
+      device.StandBy();
+      portEXIT_CRITICAL(&cecMux);
+    }
+  }
+  doc["status"] = "ok";
+
+  response->setLength();
+  request->send(response);
+}
 
 void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
 {
-  printf("wii post\n");
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
-
   const JsonObject& jsonObj = json.as<JsonObject>();
 
   wii_power_status_t status = WII_POWER_STATUS_UNKNOWN;
@@ -162,15 +202,24 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
     if (jsonObj["state"] == "on")
     {
       status = wii_power_on();
+      portENTER_CRITICAL(&cecMux);
+      device.TvScreenOn();
+      device.SystemAudioModeRequest(0x4200);
+      device.SetSystemAudioMode(true);
+      portEXIT_CRITICAL(&cecMux);
       toggle_delay = 5000;
     }
     else if (jsonObj["state"] == "off")
     {
       status = wii_power_off();
+      portENTER_CRITICAL(&cecMux);
+      device.StandBy();
+      portEXIT_CRITICAL(&cecMux);
       toggle_delay = 0;
     }
   }
   doc["power_toggled"] = status == WII_POWER_STATUS_TOGGLED;
+  doc["status"] = "ok";
 
   if (status == WII_POWER_STATUS_TOGGLED)
   {
@@ -524,15 +573,31 @@ double uptimed()
   return esp_timer_get_time() / 1000000.0;
 }
 
+void IRAM_ATTR wii_pair_irq_handler()
+{
+  wii_pair_request = true;
+}
+
 void setup()
 {
   digitalWrite(ONBOARD_LED_GPIO, HIGH);
+  pinMode(WII_PAIR_GPIO, INPUT_PULLUP);
   pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
   pinMode(CEC_GPIO_INPUT, INPUT_PULLUP);
   pinMode(CEC_GPIO_OUTPUT, OUTPUT_OPEN_DRAIN);
   digitalWrite(CEC_GPIO_OUTPUT, HIGH);
   pinMode(ONBOARD_LED_GPIO, OUTPUT);
   delay(50);
+
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+  {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      err = nvs_flash_init();
+  }
+
+  err = nvs_open("default", NVS_READWRITE, &config_nvs_handle);
+  ESP_ERROR_CHECK(err);
 
   request_sem = xSemaphoreCreateBinary();
   response_sem = xSemaphoreCreateBinary();
@@ -544,8 +609,11 @@ void setup()
 // disableCore1WDT();
 // disableLoopWDT(); 
 
-  Serial.begin(115200);
+  Serial.begin(921600);
   while (!Serial) delay(50);
+
+  attachInterrupt(digitalPinToInterrupt(WII_PAIR_GPIO), wii_pair_irq_handler, FALLING);
+
 
 #ifdef HDMI_CEC
   Serial.println("Waiting for hotplug signal...");
@@ -590,7 +658,7 @@ void setup()
   }
 
   device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
-  xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
+  xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 2, NULL);
 #endif
 
   wii_init();
@@ -600,10 +668,12 @@ void setup()
   server.on("/standby", HTTP_GET, handle_standby);
   server.on("/wii/pair", HTTP_GET, handle_wii_pair_get);
   server.on("/wii", HTTP_GET, handle_wii_get);
+  server.on("/tv", HTTP_GET, handle_tv_get);
   //server.on("/transmit", HTTP_GET, handle_transmit);
   server.on("^\\/device\\/([0-9]+)\\/send$", HTTP_GET, handle_send);
   server.onNotFound(handle_404);
   server.addHandler(new AsyncCallbackJsonWebHandler("/wii", handle_wii_post));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/tv", handle_tv_post));
 
   connect_wiFi();
 
@@ -662,18 +732,33 @@ void loop()
     //}
   }
 #endif
-  delay(1000);
+  if (wii_pair_request)
+  {
+    wii_pair_request = false;
+    wii_pair();
+  }
+
+  delay(500);
 }
 
 void cec_loop(void* param)
 {
   while (1)
   {
+    bool activity = digitalRead(CEC_GPIO_INPUT) == LOW;
+    double now = uptimed();
     portENTER_CRITICAL(&cecMux);
-    device.Run();
+    do 
+    {      
+      device.Run();
+      
+      bool more_activity = digitalRead(CEC_GPIO_INPUT) == LOW;
+      if (more_activity)
+      {
+        now = uptimed();
+      }
+    }
+    while (activity && uptimed() - now < 1.0);
     portEXIT_CRITICAL(&cecMux);
-    //yield();
-    //delayMicroseconds(50);
-    //delay(50);
   }
 }

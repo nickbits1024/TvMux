@@ -1,6 +1,8 @@
 #ifndef WII_H
 #define WII_H
 
+#define WII_PAIR_GPIO               32
+
 #define WII_REMOTE_COD              0x002504
 #define WII_COD                     0x000448
 #define WII_REMOTE_NAME             "Nintendo RVL-CNT-01"

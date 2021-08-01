@@ -3,4 +3,6 @@
 
 #define ONBOARD_LED_GPIO           2
 
+extern nvs_handle config_nvs_handle;
+
 #endif
