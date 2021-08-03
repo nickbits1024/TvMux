@@ -13,7 +13,8 @@ extern xSemaphoreHandle response_sem;
 extern xSemaphoreHandle responded_sem;
 extern unsigned char reply[CEC_MAX_MSG_SIZE];
 extern int reply_length;
-extern unsigned char reply_filter[2];
+extern unsigned char reply_filter;
+extern int reply_address;
 
 
 HomeTvCec::HomeTvCec()  :
@@ -148,7 +149,8 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
   {
     if (reply_length != 0)
     {
-      if (memcmp(buffer, reply_filter, 2) == 0 && count <= CEC_MAX_MSG_SIZE)
+      if ((reply_address == -1 || (buffer[0] >> 4) == reply_address) && 
+          buffer[1] == reply_filter && count <= CEC_MAX_MSG_SIZE)
       {
         memcpy(reply, buffer, count);
         reply_length = count;

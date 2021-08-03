@@ -31,6 +31,7 @@ xSemaphoreHandle response_sem;
 xSemaphoreHandle responded_sem;
 unsigned char reply[CEC_MAX_MSG_SIZE];
 int reply_length;
+int reply_address;
 unsigned char reply_filter;
 //double last_hpd_time;
 HomeTvCec device;
@@ -117,6 +118,32 @@ void handle_standby(AsyncWebServerRequest* request)
 
   auto response = new PrettyAsyncJsonResponse(false, 16);
   auto doc = response->getRoot();
+
+  doc["status"] = "ok";
+
+  response->setLength();
+  request->send(response);
+}
+
+void handle_tv_pause_get(AsyncWebServerRequest* request)
+{
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+
+  device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_PAUSE);
+
+  doc["status"] = "ok";
+
+  response->setLength();
+  request->send(response);
+}
+
+void handle_tv_play_get(AsyncWebServerRequest* request)
+{
+  auto response = new PrettyAsyncJsonResponse(false, 256);
+  auto doc = response->getRoot();
+
+  device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_PLAY);
 
   doc["status"] = "ok";
 
@@ -300,6 +327,7 @@ void handle_send(AsyncWebServerRequest* request)
       unsigned int temp;
       sscanf(hex, "%02x", &temp);
       reply_length = CEC_MAX_MSG_SIZE;
+      reply_address = target == CEC_BROADCAST_ADDRESS ? -1 : target;
       reply_filter = (unsigned char)reply_command_value;
     }
     else
@@ -673,6 +701,8 @@ void setup()
   server.on("/standby", HTTP_GET, handle_standby);
   server.on("/wii/pair", HTTP_GET, handle_wii_pair_get);
   server.on("/wii", HTTP_GET, handle_wii_get);
+  server.on("/tv/play", HTTP_GET, handle_tv_play_get);
+  server.on("/tv/pause", HTTP_GET, handle_tv_pause_get);
   server.on("/tv", HTTP_GET, handle_tv_get);
   //server.on("/transmit", HTTP_GET, handle_transmit);
   server.on("^\\/device\\/([0-9]+)\\/send$", HTTP_GET, handle_send);
