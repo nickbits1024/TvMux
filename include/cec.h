@@ -75,7 +75,7 @@ public:
 
   void Run();
 
-  bool Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_fitler, uint8_t* reply, int* reply_size);
+  bool Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size);
 
   void StandBy();
   void TvScreenOn();

@@ -235,7 +235,7 @@ void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, in
   xQueueSend(this->queueHandle, &msg, portMAX_DELAY);
 }
 
-bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_fitler, uint8_t* reply, int* reply_size)
+bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size)
 {
   if ((reply == NULL && reply_size != NULL) || (reply_size != NULL && *reply_size < CEC_MAX_MSG_SIZE))
   {

@@ -144,12 +144,45 @@ void handle_tv_play_get(AsyncWebServerRequest* request)
   request->send(response);
 }
 
+void set_tv_state(JsonVariant& doc)
+{
+  uint8_t cmd[] = { 0x8f };
+  uint8_t reply[CEC_MAX_MSG_SIZE];
+  int reply_size;
+  bool tv_on = false;
+
+  reply_size = CEC_MAX_MSG_SIZE;
+  if (device.Control(CEC_TV_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
+  {
+    tv_on |= reply[2] == 0;
+  }
+  reply_size = CEC_MAX_MSG_SIZE;
+  if (!tv_on && device.Control(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
+  {
+    tv_on |= reply[2] == 0;
+  }
+  reply_size = CEC_MAX_MSG_SIZE;
+  if (!tv_on && device.Control(CEC_PLAYBACK_DEVICE_1_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
+  {
+    tv_on |= reply[2] == 0;
+  }
+  // printf("reply size %d\nreply:", reply_size);
+  // for (int i = 0; i < reply_size; i++)
+  // {
+  //   printf(" %02x", reply[i]);
+  // }
+  // printf("\n");
+
+  doc["state"] = tv_on ? "on" : "off";
+}
+
 void handle_tv_get(AsyncWebServerRequest* request)
 {
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
 
   doc["status"] = "ok";
+  set_tv_state(doc);
 
   response->setLength();
   request->send(response);
@@ -157,6 +190,7 @@ void handle_tv_get(AsyncWebServerRequest* request)
 
 void handle_wii_get(AsyncWebServerRequest* request)
 {
+  //printf("wii/get from %s\n", request->client()->remoteIP().toString().c_str());
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
 
@@ -205,6 +239,7 @@ void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
       //portEXIT_CRITICAL(&cecMux);
     }
   }
+  set_tv_state(doc);
   doc["status"] = "ok";
 
   response->setLength();
@@ -289,20 +324,21 @@ void handle_control(AsyncWebServerRequest* request)
     request_buffer[i] = (unsigned char)temp;
   }
 
-  int reply_command_value = -1;
+  int reply_filter = -1;
   if (reply_command.length() == 2)
   {
     hex = reply_command.c_str();
-    sscanf(hex, "%02x", &reply_command_value);
+    sscanf(hex, "%02x", &reply_filter);
+    printf("reply_filter=%02x\n", reply_filter);
   }
 
   std::string reply_string;
   const char* reply_status = "ok";
 
-  if (reply_command_value != -1)
+  if (reply_filter != -1)
   {
     int reply_buffer_size = CEC_MAX_MSG_SIZE;
-    if (device.Control(target, request_buffer, len, (uint8_t)reply_command_value, reply_buffer, &reply_buffer_size))
+    if (device.Control(target, request_buffer, len, (uint8_t)reply_filter, reply_buffer, &reply_buffer_size))
     {
       format_bytes(reply_string, reply_buffer + 1, reply_buffer_size - 1);
     }
@@ -326,7 +362,7 @@ void handle_control(AsyncWebServerRequest* request)
   doc["target"] = target;
   doc["cmd"] = cmd;
   doc["reply_status"] = reply_status;
-  if (reply_command_value != -1)
+  if (reply_filter != -1)
   {
     doc["reply"] = reply_string.c_str();
   }
@@ -651,7 +687,7 @@ void setup()
   server.on("/tv/play", HTTP_GET, handle_tv_play_get);
   server.on("/tv/pause", HTTP_GET, handle_tv_pause_get);
   server.on("/tv", HTTP_GET, handle_tv_get);
-  server.on("^\\/device\\/([0-9]+)\\/control$", HTTP_GET, handle_control);
+  server.on("^\\/cec\\/([0-9]+)\\/device$", HTTP_GET, handle_control);
   server.onNotFound(handle_404);
   server.addHandler(new AsyncCallbackJsonWebHandler("/wii", handle_wii_post));
   server.addHandler(new AsyncCallbackJsonWebHandler("/tv", handle_tv_post));
