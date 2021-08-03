@@ -53,19 +53,29 @@ private:
   xQueueHandle queueHandle;
   CEC_MESSAGE* pendingMessage;
 
+  xSemaphoreHandle request_sem;
+  portMUX_TYPE response_mux;
+  xSemaphoreHandle responded_sem;
+  uint8_t* reply;
+  int* reply_size;
+  int reply_address;
+  uint8_t reply_filter;
+
 protected:
   virtual bool LineState();
   virtual void SetLineState(bool);
   virtual void OnReady(int logicalAddress);
   virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
   virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
+  void TransmitFrame(int targetAddress, const uint8_t* buffer, int count);
+  //void TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count);
 
 public:
   HomeTvCec();
 
-  void TransmitFrame(int targetAddress, const unsigned char* buffer, int count);
-  //void TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count);
   void Run();
+
+  bool Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_fitler, uint8_t* reply, int* reply_size);
 
   void StandBy();
   void TvScreenOn();

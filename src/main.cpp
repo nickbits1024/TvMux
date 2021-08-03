@@ -22,17 +22,10 @@
 
 AsyncWebServer server(80);
 //portMUX_TYPE cecMux = portMUX_INITIALIZER_UNLOCKED;
-portMUX_TYPE historyMux = portMUX_INITIALIZER_UNLOCKED;
-std::list<std::string> history;
+//portMUX_TYPE historyMux = portMUX_INITIALIZER_UNLOCKED;
+//std::list<std::string> history;
 uint16_t cec_physical_address;
 //volatile bool hdmi_unplugged;
-xSemaphoreHandle request_sem;
-xSemaphoreHandle response_sem;
-xSemaphoreHandle responded_sem;
-unsigned char reply[CEC_MAX_MSG_SIZE];
-int reply_length;
-int reply_address;
-unsigned char reply_filter;
 //double last_hpd_time;
 HomeTvCec device;
 bool wii_pair_request;
@@ -94,21 +87,21 @@ void handle_heap(AsyncWebServerRequest* request)
   request->send(response);
 }
 
-void handle_history(AsyncWebServerRequest* request)
-{
-  auto response = new PrettyAsyncJsonResponse(true, 256);
-  auto doc = response->getRoot();
+// void handle_history(AsyncWebServerRequest* request)
+// {
+//   auto response = new PrettyAsyncJsonResponse(true, 256);
+//   auto doc = response->getRoot();
 
-  portENTER_CRITICAL(&historyMux);
-  for (std::list<std::string>::iterator it = history.begin(); it != history.end(); it++)
-  {
-    doc.add(it->c_str());
-  }
-  portEXIT_CRITICAL(&historyMux);
+//   portENTER_CRITICAL(&historyMux);
+//   for (std::list<std::string>::iterator it = history.begin(); it != history.end(); it++)
+//   {
+//     doc.add(it->c_str());
+//   }
+//   portEXIT_CRITICAL(&historyMux);
 
-  response->setLength();
-  request->send(response);
-}
+//   response->setLength();
+//   request->send(response);
+// }
 
 void handle_standby(AsyncWebServerRequest* request)
 {
@@ -270,17 +263,18 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
   request->send(response);
 }
 
-void handle_send(AsyncWebServerRequest* request)
+void handle_control(AsyncWebServerRequest* request)
 {
   int target = request->pathArg(0).toInt();
   //int from = request->hasArg("from") ? request->arg("from").toInt() : -1;
   String cmd = request->arg("cmd");
   String reply_command = request->arg("reply");
   //Serial.println("send 1");
-  char buffer[CEC_MAX_MSG_SIZE];
+  uint8_t request_buffer[CEC_MAX_MSG_SIZE];
+  uint8_t reply_buffer[CEC_MAX_MSG_SIZE];
   int len = (cmd.length() + 1) / 3;
   if (len == 0 ||
-    len > sizeof(buffer) ||
+    len > sizeof(request_buffer) ||
     (reply_command.length() != 0 && reply_command.length() != 2))
   {
     request->send(500);
@@ -292,21 +286,8 @@ void handle_send(AsyncWebServerRequest* request)
   for (int i = 0; i < len; i++)
   {
     sscanf(hex + i * 3, "%02x", &temp);
-    buffer[i] = (unsigned char)temp;
+    request_buffer[i] = (unsigned char)temp;
   }
-  // String temp;
-
-  // for (int i = 0; i < len; i++)
-  // {
-  //   if (i != 0)
-  //   {
-  //     temp += ":";
-  //   }
-  //   char hex[3];
-  //   snprintf(hex, 3, "%02x", buffer[i]);
-  //   temp += hex;
-  // }
-  //Serial.printf("send %u bytes, %s\n", len, temp.c_str());
 
   int reply_command_value = -1;
   if (reply_command.length() == 2)
@@ -314,56 +295,28 @@ void handle_send(AsyncWebServerRequest* request)
     hex = reply_command.c_str();
     sscanf(hex, "%02x", &reply_command_value);
   }
-  //Serial.println("enter data");
+
   std::string reply_string;
   const char* reply_status = "ok";
 
-  if (xSemaphoreTake(request_sem, 5000 / portTICK_PERIOD_MS))
+  if (reply_command_value != -1)
   {
-    //portENTER_CRITICAL(&dataMux);    
-    if (reply_command.length() == 2)
+    int reply_buffer_size = CEC_MAX_MSG_SIZE;
+    if (device.Control(target, request_buffer, len, (uint8_t)reply_command_value, reply_buffer, &reply_buffer_size))
     {
-      hex = reply_command.c_str();
-      unsigned int temp;
-      sscanf(hex, "%02x", &temp);
-      reply_length = CEC_MAX_MSG_SIZE;
-      reply_address = target == CEC_BROADCAST_ADDRESS ? -1 : target;
-      reply_filter = (unsigned char)reply_command_value;
+      format_bytes(reply_string, reply_buffer + 1, reply_buffer_size - 1);
     }
     else
     {
-      reply_length = 0;
+      reply_status = "error";
     }
-    xSemaphoreTake(responded_sem, portMAX_DELAY);
-    xSemaphoreGive(response_sem);
-    //portEXIT_CRITICAL(&dataMux);
-    //Serial.println("leave data, enter cec");
-    //portENTER_CRITICAL(&cecMux);
-    //device.TransmitFrame(from, target, (unsigned char*)buffer, len);
-    device.TransmitFrame(target, (unsigned char*)buffer, len);
-    //portEXIT_CRITICAL(&cecMux);
-    //Serial.println("leave data, leave cec");
-
-    if (reply_command_value != -1)
+  }
+  else
+  {
+    if (!device.Control(target, request_buffer, len, 0, NULL, NULL))
     {
-      Serial.printf("Waiting for reply %02x\n", reply_command_value);
-      if (xSemaphoreTake(responded_sem, 5000 / portTICK_PERIOD_MS))
-      {
-        //portENTER_CRITICAL(&dataMux);
-        if (reply_length > 1)
-        {
-          format_bytes(reply_string, reply + 1, reply_length - 1);
-        }
-        //portEXIT_CRITICAL(&dataMux);
-      }
-      else
-      {
-        reply_status = "error";
-      }
+      reply_status = "error";
     }
-    xSemaphoreTake(response_sem, portMAX_DELAY);
-    xSemaphoreGive(responded_sem);
-    xSemaphoreGive(request_sem);
   }
 
   auto response = new PrettyAsyncJsonResponse(false, 256);
@@ -372,9 +325,9 @@ void handle_send(AsyncWebServerRequest* request)
 
   doc["target"] = target;
   doc["cmd"] = cmd;
+  doc["reply_status"] = reply_status;
   if (reply_command_value != -1)
   {
-    doc["reply_status"] = reply_status;
     doc["reply"] = reply_string.c_str();
   }
 
@@ -382,65 +335,65 @@ void handle_send(AsyncWebServerRequest* request)
   request->send(response);
 }
 
-void handle_transmit(AsyncWebServerRequest* request)
-{
-  if (!request->hasArg("target") || !request->hasArg("cmd"))
-  {
-    request->send(500);
-    return;
-  }
+// void handle_control(AsyncWebServerRequest* request)
+// {
+//   if (!request->hasArg("target") || !request->hasArg("cmd"))
+//   {
+//     request->send(500);
+//     return;
+//   }
 
-  int target = request->arg("target").toInt();
-  String cmd = request->arg("cmd");
+//   int target = request->arg("target").toInt();
+//   String cmd = request->arg("cmd");
 
-  cmd.replace(":", "");
+//   cmd.replace(":", "");
 
-  char buffer[256];
-  int len = cmd.length() / 2;
-  if (len > sizeof(buffer))
-  {
-    request->send(500);
-    return;
-  }
-  Serial.printf("cmd=%s\n", cmd.c_str());
-  for (int i = 0; i < len; i++)
-  {
-    String hex = cmd.substring(i * 2, i * 2 + 2);
-    //Serial.printf("hex=%s\n", hex.c_str());
-    unsigned int temp;
-    sscanf(hex.c_str(), "%02x", &temp);
-    buffer[i] = (char)temp;
-  }
+//   char buffer[256];
+//   int len = cmd.length() / 2;
+//   if (len > sizeof(buffer))
+//   {
+//     request->send(500);
+//     return;
+//   }
+//   Serial.printf("cmd=%s\n", cmd.c_str());
+//   for (int i = 0; i < len; i++)
+//   {
+//     String hex = cmd.substring(i * 2, i * 2 + 2);
+//     //Serial.printf("hex=%s\n", hex.c_str());
+//     unsigned int temp;
+//     sscanf(hex.c_str(), "%02x", &temp);
+//     buffer[i] = (char)temp;
+//   }
 
-  String temp;
+//   String temp;
 
-  for (int i = 0; i < len; i++)
-  {
-    if (i != 0)
-    {
-      temp += ":";
-    }
-    char hex[3];
-    snprintf(hex, 3, "%02x", buffer[i]);
-    temp += hex;
-  }
-  Serial.printf("reconstructed: %s\n", temp.c_str());
+//   for (int i = 0; i < len; i++)
+//   {
+//     if (i != 0)
+//     {
+//       temp += ":";
+//     }
+//     char hex[3];
+//     snprintf(hex, 3, "%02x", buffer[i]);
+//     temp += hex;
+//   }
+//   Serial.printf("reconstructed: %s\n", temp.c_str());
 
-  //portENTER_CRITICAL(&cecMux);
+//   //portENTER_CRITICAL(&cecMux);
 
-  device.TransmitFrame(target, (unsigned char*)buffer, len);
+//   device.Control(target, (unsigned char*)buffer, len, 0, NULL, NULL);
 
-  //portEXIT_CRITICAL(&cecMux);
+//   //portEXIT_CRITICAL(&cecMux);
 
-  auto response = new PrettyAsyncJsonResponse(false, 256);
-  auto doc = response->getRoot();
+//   auto response = new PrettyAsyncJsonResponse(false, 256);
+//   auto doc = response->getRoot();
 
-  doc["target"] = target;
-  doc["cmd"] = temp;
+//   doc["target"] = target;
+//   doc["cmd"] = temp;
 
-  response->setLength();
-  request->send(response);
-}
+//   response->setLength();
+//   request->send(response);
+// }
 
 bool parse_edid(unsigned char* edid)
 {
@@ -632,12 +585,6 @@ void setup()
   err = nvs_open("default", NVS_READWRITE, &config_nvs_handle);
   ESP_ERROR_CHECK(err);
 
-  request_sem = xSemaphoreCreateBinary();
-  response_sem = xSemaphoreCreateBinary();
-  responded_sem = xSemaphoreCreateBinary();
-  xSemaphoreGive(request_sem);
-  xSemaphoreGive(responded_sem);
-
   // disableCore0WDT();
   // disableCore1WDT();
   // disableLoopWDT(); 
@@ -697,15 +644,14 @@ void setup()
   wii_init();
 
   server.on("/heap", HTTP_GET, handle_heap);
-  server.on("/history", HTTP_GET, handle_history);
+  //server.on("/history", HTTP_GET, handle_history);
   server.on("/standby", HTTP_GET, handle_standby);
   server.on("/wii/pair", HTTP_GET, handle_wii_pair_get);
   server.on("/wii", HTTP_GET, handle_wii_get);
   server.on("/tv/play", HTTP_GET, handle_tv_play_get);
   server.on("/tv/pause", HTTP_GET, handle_tv_pause_get);
   server.on("/tv", HTTP_GET, handle_tv_get);
-  //server.on("/transmit", HTTP_GET, handle_transmit);
-  server.on("^\\/device\\/([0-9]+)\\/send$", HTTP_GET, handle_send);
+  server.on("^\\/device\\/([0-9]+)\\/control$", HTTP_GET, handle_control);
   server.onNotFound(handle_404);
   server.addHandler(new AsyncCallbackJsonWebHandler("/wii", handle_wii_post));
   server.addHandler(new AsyncCallbackJsonWebHandler("/tv", handle_tv_post));
