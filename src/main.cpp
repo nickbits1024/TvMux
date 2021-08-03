@@ -171,10 +171,11 @@ void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
     {
       printf("turn tv on\n");
       //portENTER_CRITICAL(&cecMux);
-      device.TvScreenOn();
-      device.SystemAudioModeRequest(0x4100);
-      //device.SetSystemAudioMode(true);
+      // device.TvScreenOn();
+      // device.SystemAudioModeRequest(0x4100);
+      // device.SetSystemAudioMode(true);
       //portEXIT_CRITICAL(&cecMux);
+      device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
     }
     else if (jsonObj["state"] == "off")
     {
@@ -245,6 +246,7 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
 void handle_send(AsyncWebServerRequest* request)
 {
   int target = request->pathArg(0).toInt();
+  //int from = request->hasArg("from") ? request->arg("from").toInt() : -1;
   String cmd = request->arg("cmd");
   String reply_command = request->arg("reply");
   //Serial.println("send 1");
@@ -309,6 +311,7 @@ void handle_send(AsyncWebServerRequest* request)
     //portEXIT_CRITICAL(&dataMux);
     //Serial.println("leave data, enter cec");
     //portENTER_CRITICAL(&cecMux);
+    //device.TransmitFrame(from, target, (unsigned char*)buffer, len);
     device.TransmitFrame(target, (unsigned char*)buffer, len);
     //portEXIT_CRITICAL(&cecMux);
     //Serial.println("leave data, leave cec");

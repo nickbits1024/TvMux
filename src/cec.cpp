@@ -13,7 +13,7 @@ extern xSemaphoreHandle response_sem;
 extern xSemaphoreHandle responded_sem;
 extern unsigned char reply[CEC_MAX_MSG_SIZE];
 extern int reply_length;
-extern unsigned char reply_filter;
+extern unsigned char reply_filter[2];
 
 
 HomeTvCec::HomeTvCec()  :
@@ -148,7 +148,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
   {
     if (reply_length != 0)
     {
-      if (buffer[1] == reply_filter && count <= CEC_MAX_MSG_SIZE)
+      if (memcmp(buffer, reply_filter, 2) == 0 && count <= CEC_MAX_MSG_SIZE)
       {
         memcpy(reply, buffer, count);
         reply_length = count;
@@ -194,9 +194,20 @@ void HomeTvCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
   add_history("tx", buffer, count, ack);
 }
 
+// void HomeTvCec::TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count)
+// {
+//   CEC_MESSAGE* msg = new CEC_MESSAGE;
+//   msg->fromAddress = fromAddress;
+//   msg->targetAddress = targetAddress;
+//   msg->size = count;
+//   memcpy(msg->data, buffer, count);
+//   xQueueSend(this->queueHandle, &msg, portMAX_DELAY);
+// }
+
 void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, int count)
 {
   CEC_MESSAGE* msg = new CEC_MESSAGE;
+  //msg->fromAddress = fromAddress;
   msg->targetAddress = targetAddress;
   msg->size = count;
   memcpy(msg->data, buffer, count);
@@ -216,7 +227,8 @@ void HomeTvCec::Run()
 
   if (this->pendingMessage != NULL)
   {
-    if (CEC_Device::TransmitFrame(this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size))
+    if (//(this->pendingMessage->fromAddress != -1 && CEC_Device::Transmit(this->pendingMessage->fromAddress, this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size)) ||
+      CEC_Device::TransmitFrame(this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size))
     {
       delete this->pendingMessage;
       this->pendingMessage = NULL;
@@ -237,23 +249,29 @@ void HomeTvCec::TvScreenOn()
 {
   uint8_t cmd[] = { 0x04 };
 
-  TransmitFrame(0, cmd, sizeof(cmd));
+  TransmitFrame(CEC_TV_ADDRESS, cmd, sizeof(cmd));
 }
 
 void HomeTvCec::SetSystemAudioMode(bool on)
 {
   uint8_t cmd[] = { 0x04, (uint8_t)(on ? 0x01 : 0x00) };
-  TransmitFrame(0, cmd, sizeof(cmd));
+  TransmitFrame(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd));
 }
 
 void HomeTvCec::SystemAudioModeRequest(uint16_t addr)
 {
   uint8_t cmd[] = { 0x70, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
-  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
+  TransmitFrame(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd)); 
 }
 
-void HomeTvCec::SetActiveSource(uint16_t addr)
+// void HomeTvCec::SetActiveSource(uint16_t addr)
+// {
+//   uint8_t cmd[] = { 0x82, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
+//   TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
+// }
+
+void HomeTvCec::UserControlPressed(int targetAddress, uint8_t userControl)
 {
-  uint8_t cmd[] = { 0x82, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
-  TransmitFrame(CEC_BROADCAST_ADDRESS, cmd, sizeof(cmd)); 
+  uint8_t cmd[] = { 0x44, userControl };
+  TransmitFrame(targetAddress, cmd, sizeof(cmd));
 }

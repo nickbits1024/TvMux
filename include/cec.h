@@ -8,15 +8,40 @@
 #define CEC_DEVICE_TYPE       CEC_Device::CDT_PLAYBACK_DEVICE
 #define CEC_MAX_MSG_SIZE      16
 #define CEC_MAX_HISTORY       64
-#define CEC_BROADCAST_ADDRESS 0xf
 #define EDID_ADDRESS          0x50
 #define EDID_LENGTH           128
 #define EDID_EXTENSION_LENGTH 128
 #define EDID_EXTENSION_DATA_LENGTH  125
 #define EDID_EXTENSION_FLAG   0x7e
 
+#define CEC_USER_CONTROL_PLAY       0x60
+#define CEC_USER_CONTROL_PAUSE      0x61
+#define CEC_USER_CONTROL_POWER_ON   0x6d
+#define CEC_USER_CONTROL_POWER_OFF  0x6c
+
+// CEC locical address handling
+typedef enum {
+  CEC_TV_ADDRESS = 0,
+  CEC_RECORDING_DEVICE_1_ADDRESS,
+  CEC_RECORDING_DEVICE_2_ADDRESS,
+  CEC_TUNER_1_ADDRESS,
+  CEC_PLAYBACK_DEVICE_1_ADDRESS,
+  CEC_AUDIO_SYSTEM_ADDRESS,
+  CEC_TUNER_2_ADDRESS,
+  CEC_TUNER_3_ADDRESS,
+  CEC_PLAYBACK_DEVICE_2_ADDRESS,
+  CEC_RECORDING_DEVICE_3_ADDRESS,
+  CEC_TUNER_4_ADDRESS,
+  CEC_PLAYBACK_DEVICE_3_ADDRESS,
+  CEC_RESERVED_1_ADDRESS,
+  CEC_RESERVED_2_ADDRESS,
+  CEC_FREE_USE_ADDRESS,
+  CEC_BROADCAST_ADDRESS
+} CEC_DEVICE_ADDRESS;
+
 struct CEC_MESSAGE
 {
+  //int fromAddress;
   int targetAddress;
   int size;
   uint8_t data[CEC_MAX_MSG_SIZE];
@@ -39,13 +64,15 @@ public:
   HomeTvCec();
 
   void TransmitFrame(int targetAddress, const unsigned char* buffer, int count);
+  //void TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count);
   void Run();
 
   void StandBy();
   void TvScreenOn();
   void SetSystemAudioMode(bool on);
-  void SetActiveSource(uint16_t addr);
+  //void SetActiveSource(uint16_t addr);
   void SystemAudioModeRequest(uint16_t addr);
+  void UserControlPressed(int targetAddress, uint8_t userControl);
 };
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count);
