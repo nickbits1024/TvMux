@@ -123,7 +123,7 @@ void handle_tv_pause_get(AsyncWebServerRequest* request)
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
 
-  device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_PAUSE);
+  device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, 0x46);
 
   doc["status"] = "ok";
 
@@ -136,7 +136,7 @@ void handle_tv_play_get(AsyncWebServerRequest* request)
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
 
-  device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_PLAY);
+  device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, 0x44);
 
   doc["status"] = "ok";
 
@@ -144,27 +144,32 @@ void handle_tv_play_get(AsyncWebServerRequest* request)
   request->send(response);
 }
 
-void set_tv_state(JsonVariant& doc)
+void set_tv_state(JsonVariant& doc, bool& tv_on, bool& tv_off)
 {
   uint8_t cmd[] = { 0x8f };
   uint8_t reply[CEC_MAX_MSG_SIZE];
   int reply_size;
-  bool tv_on = false;
+
+  tv_on = false;
+  tv_off = false;
 
   reply_size = CEC_MAX_MSG_SIZE;
   if (device.Control(CEC_TV_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
   {
     tv_on |= reply[2] == 0;
+    tv_off |= reply[2] != 0;
   }
   reply_size = CEC_MAX_MSG_SIZE;
-  if (!tv_on && device.Control(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
+  if (device.Control(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
   {
     tv_on |= reply[2] == 0;
+    tv_off |= reply[2] != 0;
   }
   reply_size = CEC_MAX_MSG_SIZE;
   if (!tv_on && device.Control(CEC_PLAYBACK_DEVICE_1_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
   {
     tv_on |= reply[2] == 0;
+    tv_off |= reply[2] != 0;
   }
   // printf("reply size %d\nreply:", reply_size);
   // for (int i = 0; i < reply_size; i++)
@@ -219,27 +224,23 @@ void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
   auto doc = response->getRoot();
   const JsonObject& jsonObj = json.as<JsonObject>();
 
-  if (jsonObj.containsKey("state"))
+  for (int i = 0; i < 5; i++)
   {
-    if (jsonObj["state"] == "on")
+    if (jsonObj.containsKey("state"))
     {
-      printf("turn tv on\n");
-      //portENTER_CRITICAL(&cecMux);
-      // device.TvScreenOn();
-      // device.SystemAudioModeRequest(0x4100);
-      // device.SetSystemAudioMode(true);
-      //portEXIT_CRITICAL(&cecMux);
-      device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
+      if (jsonObj["state"] == "on")
+      {
+        printf("turn tv on\n");
+        device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
+      }
+      else if (jsonObj["state"] == "off")
+      {
+        printf("turn tv off\n");
+        device.StandBy();
+      }
     }
-    else if (jsonObj["state"] == "off")
-    {
-      printf("turn tv off\n");
-      //portENTER_CRITICAL(&cecMux);
-      device.StandBy();
-      //portEXIT_CRITICAL(&cecMux);
-    }
+    bool tv_on = set_tv_state(doc);
   }
-  set_tv_state(doc);
   doc["status"] = "ok";
 
   response->setLength();
@@ -625,7 +626,7 @@ void setup()
   // disableCore1WDT();
   // disableLoopWDT(); 
 
-  Serial.begin(921600);
+  Serial.begin(115200);
   while (!Serial) delay(50);
 
   attachInterrupt(digitalPinToInterrupt(WII_PAIR_GPIO), wii_pair_irq_handler, FALLING);
@@ -701,12 +702,18 @@ void setup()
 
 void loop()
 {
+  static double hpd_time;
+
   connect_wiFi();
 
 #ifdef HDMI_CEC
   bool hpd = digitalRead(HOTPLUG_GPIO) == HIGH;
+  if (hpd)
+  {
+    hpd_time = uptimed();
+  }
 
-  if (!hpd)
+  if (!hpd && (uptimed() - hpd_time) > 5.0)
   {
     Serial.println("HDMI unplugged, rebooting in 1s...");
     delay(1000);
