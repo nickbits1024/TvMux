@@ -19,6 +19,10 @@
 #define CEC_USER_CONTROL_POWER_ON   0x6d
 #define CEC_USER_CONTROL_POWER_OFF  0x6c
 
+#define CEC_REQUEST_WAIT               5000
+#define CEC_RESPONSE_WAIT              1000
+
+
 // CEC locical address handling
 typedef enum {
   CEC_TV_ADDRESS = 0,
@@ -79,9 +83,9 @@ public:
 
   void StandBy();
   void TvScreenOn();
-  void SetSystemAudioMode(bool on);
+  //void SetSystemAudioMode(bool on);
   //void SetActiveSource(uint16_t addr);
-  void SystemAudioModeRequest(uint16_t addr);
+  bool SystemAudioModeRequest(uint16_t addr);
   void UserControlPressed(int targetAddress, uint8_t userControl);
 };
 

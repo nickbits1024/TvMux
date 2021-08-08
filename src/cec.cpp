@@ -17,13 +17,13 @@ extern uint16_t cec_physical_address;
 // extern int reply_address;
 
 
-HomeTvCec::HomeTvCec()  :
+HomeTvCec::HomeTvCec() :
   pendingMessage(NULL),
   response_mux(portMUX_INITIALIZER_UNLOCKED),
   reply(NULL),
   reply_size(NULL),
   reply_address(-1)
-{  
+{
   this->queueHandle = xQueueCreate(100, sizeof(CEC_MESSAGE*));
   request_sem = xSemaphoreCreateBinary();
   //response_sem = xSemaphoreCreateBinary();
@@ -40,19 +40,9 @@ bool HomeTvCec::LineState()
 
 void HomeTvCec::SetLineState(bool state)
 {
-  if (state)
-  {
-    //pinMode(CEC_GPIO, INPUT_PULLUP);
-    digitalWrite(CEC_GPIO_OUTPUT, HIGH);
-  }
-  else
-  {
-    //digitalWrite(CEC_GPIO, LOW);
-    //pinMode(CEC_GPIO, OUTPUT);
-    digitalWrite(CEC_GPIO_OUTPUT, LOW);
-  }
+  digitalWrite(CEC_GPIO_OUTPUT, state ? HIGH : LOW);
   // give enough time for the line to settle before sampling it
-  delayMicroseconds(16);
+  delayMicroseconds(50);
 }
 
 void HomeTvCec::OnReady(int logicalAddress)
@@ -96,54 +86,11 @@ void format_bytes(std::string& s, unsigned char* buffer, int count)
 
 void print_io(const char* prefix, unsigned char* buffer, int size, bool ack)
 {
-  // std::stringstream ss;
-
-  // ss << millis() << " " << prefix << " ";
-
-
-  // format_bytes(ss, buffer, count);
-
-  // if (!ack)
-  // {
-  //   ss << " !";
-  // }
-
-  // // // This is called when a frame is received.  To transmit
-  // // // a frame call TransmitFrame.  To receive all frames, even
-  // // // those not addressed to this device, set Promiscuous to true.
-  // // DbgPrint("Packet received at %ld: %02x", millis(), buffer[0]);
-  // // for (int i = 1; i < count; i++)
-  // //   DbgPrint(":%02X", buffer[i]);
-  // // if (!ack)
-  // //   DbgPrint(" NAK");
-  // // DbgPrint("\n");
-
-  // // std::string s;
-
-  // // for (int i = 0; i < count; i++)
-  // // {
-  // //   char hex[3];
-  // //   snprintf(hex, 3, "%02x", buffer[i]);
-  // //   s += hex;
-  // // }
-
-  // std::string s(ss.str());
-
-  // println(s.c_str());
-
-  // portENTER_CRITICAL(&historyMux);
-  // history.push_front(s);
-  // if (history.size() > CEC_MAX_HISTORY)
-  // {
-  //   history.pop_back();
-  // }
-  // portEXIT_CRITICAL(&historyMux);
-
-  printf("%s:", prefix);
+  printf("%s: ", prefix);
   for (int i = 0; i < size; i++)
   {
-    printf(" %02x", buffer[i]);
-  } 
+    printf("%s%02x", i == 0 ? "" : ":", buffer[i]);
+  }
   if (!ack)
   {
     printf(" !");
@@ -157,7 +104,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
   if (size < 2)
     return;
 
-  print_io("rx", buffer, size, ack);
+  print_io("cec rx", buffer, size, ack);
 
   // Ignore messages not sent to us
   if ((buffer[0] & 0xf) != LogicalAddress())
@@ -168,9 +115,13 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
   {
     if (this->reply != NULL && this->reply_size != NULL)
     {
-      if ((reply_address == -1 || (buffer[0] >> 4) == reply_address) && 
-          buffer[1] == reply_filter && size <= CEC_MAX_MSG_SIZE)
+      if ((reply_address == -1 || (buffer[0] >> 4) == reply_address) &&
+        buffer[1] == reply_filter && size <= CEC_MAX_MSG_SIZE)
       {
+        // if (size >= 3)
+        // {
+        //   ets_printf("copy reply %02x:%02x:%02x\n", buffer[0], buffer[1], buffer[2]);
+        // }
         memcpy(this->reply, buffer, size);
         *this->reply_size = size;
         xSemaphoreGive(responded_sem);
@@ -182,7 +133,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
   //portENTER_CRITICAL(&cecMux);
   switch (buffer[1])
   {
-  case 0x83:
+    case 0x83:
     { // <Give Physical Address>
       //unsigned char buf[4] = { 0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE };
       uint8_t buf[4] =
@@ -195,9 +146,9 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
       TransmitFrame(0xf, buf, 4); // <Report Physical Address>
       break;
     }
-  case 0x8c: // <Give Device Vendor ID>
-    TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
-    break;
+    case 0x8c: // <Give Device Vendor ID>
+      TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
+      break;
   }
   //portEXIT_CRITICAL(&cecMux);
 }
@@ -212,7 +163,7 @@ void HomeTvCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
   //   DbgPrint(" NAK");
   // DbgPrint("\n");
 
-  print_io("tx", buffer, count, ack);
+  print_io("cec tx", buffer, count, ack);
 }
 
 // void HomeTvCec::TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count)
@@ -232,6 +183,14 @@ void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, in
   msg->targetAddress = targetAddress;
   msg->size = count;
   memcpy(msg->data, buffer, count);
+
+  // printf("queue ");
+  // for (int i = 0; i < msg->size; i++)
+  // {
+  //   printf("%s%02x", i != 0 ? ":" : "", msg->data[i]);
+  // }
+  // printf("\n");
+  
   xQueueSend(this->queueHandle, &msg, portMAX_DELAY);
 }
 
@@ -244,12 +203,14 @@ bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_
 
   bool success = true;
 
-  if (xSemaphoreTake(request_sem, 5000 / portTICK_PERIOD_MS))
+  if (xSemaphoreTake(this->request_sem, CEC_REQUEST_WAIT / portTICK_PERIOD_MS))
   {
     portENTER_CRITICAL(&response_mux);
     xSemaphoreTake(responded_sem, 0);
     if (reply != NULL)
     {
+      //ets_printf("zero reply %u\n", *reply_size);
+      memset(reply, 0, *reply_size);
       this->reply = reply;
       this->reply_size = reply_size;
       this->reply_address = target_address == CEC_BROADCAST_ADDRESS ? -1 : target_address;
@@ -260,15 +221,13 @@ bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_
       this->reply_size = 0;
     }
     portEXIT_CRITICAL(&response_mux);
-    //xSemaphoreTake(responded_sem, portMAX_DELAY);
-    //xSemaphoreGive(response_sem);
 
     TransmitFrame(target_address, (unsigned char*)request, request_size);
 
     if (reply != NULL)
     {
-      printf("Waiting for reply %02x\n", reply_filter);
-      if (xSemaphoreTake(responded_sem, 5000 / portTICK_PERIOD_MS) != pdTRUE)
+      printf("cec wait: %02x:%02x\n", target_address << 4 | LogicalAddress(), reply_filter);
+      if (xSemaphoreTake(responded_sem, CEC_RESPONSE_WAIT / portTICK_PERIOD_MS) != pdTRUE)
       {
         //memcpy(reply, this->reply, this->reply_size);
         //*reply_size = this->reply_size;
@@ -277,14 +236,15 @@ bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_
     }
     //xSemaphoreTake(this->response_sem, portMAX_DELAY);
     //xSemaphoreGive(this->responded_sem);
+
+    portENTER_CRITICAL(&response_mux);
+    this->reply = NULL;
+    this->reply_size = NULL;
+    this->reply_address = -1;
+    portEXIT_CRITICAL(&response_mux);
+
     xSemaphoreGive(this->request_sem);
   }
-
-  portENTER_CRITICAL(&response_mux);
-  this->reply = NULL;
-  this->reply_size = NULL;
-  this->reply_address = -1;
-  portEXIT_CRITICAL(&response_mux);
 
   return success;
 }
@@ -297,6 +257,13 @@ void HomeTvCec::Run()
     if (xQueueReceive(this->queueHandle, &msg, 0) == pdTRUE)
     {
       this->pendingMessage = msg;
+
+      // printf("loaded %u ", this->pendingMessage->size);
+      // for (int i = 0; i < this->pendingMessage->size; i++)
+      // {
+      //   printf("%s%02x", i != 0 ? ":" : "", this->pendingMessage->data[i]);
+      // }
+      // printf("\n");
     }
   }
 
@@ -305,6 +272,12 @@ void HomeTvCec::Run()
     if (//(this->pendingMessage->fromAddress != -1 && CEC_Device::Transmit(this->pendingMessage->fromAddress, this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size)) ||
       CEC_Device::TransmitFrame(this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size))
     {
+      // printf("transmitted ");
+      // for (int i = 0; i < this->pendingMessage->size; i++)
+      // {
+      //   printf("%s%02x", i != 0 ? ":" : "", this->pendingMessage->data[i]);
+      // }
+      // printf("\n");
       delete this->pendingMessage;
       this->pendingMessage = NULL;
     }
@@ -327,16 +300,20 @@ void HomeTvCec::TvScreenOn()
   TransmitFrame(CEC_TV_ADDRESS, cmd, sizeof(cmd));
 }
 
-void HomeTvCec::SetSystemAudioMode(bool on)
-{
-  uint8_t cmd[] = { 0x04, (uint8_t)(on ? 0x01 : 0x00) };
-  TransmitFrame(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd));
-}
+// void HomeTvCec::SetSystemAudioMode(bool on)
+// {
+//   uint8_t cmd[] = { 0x04, (uint8_t)(on ? 0x01 : 0x00) };
+//   TransmitFrame(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd));
+// }
 
-void HomeTvCec::SystemAudioModeRequest(uint16_t addr)
+bool HomeTvCec::SystemAudioModeRequest(uint16_t addr)
 {
   uint8_t cmd[] = { 0x70, (uint8_t)(addr >> 8), (uint8_t)(addr & 0xff) };
-  TransmitFrame(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd)); 
+  uint8_t reply[CEC_MAX_MSG_SIZE];
+  int reply_size = CEC_MAX_MSG_SIZE;
+  return Control(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd), 0x72, reply, &reply_size) &&
+    reply_size == 2 && 
+    reply[2] == 0x01;
 }
 
 // void HomeTvCec::SetActiveSource(uint16_t addr)

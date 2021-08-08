@@ -7,6 +7,7 @@
 #include <ESPAsyncWebServer.h>
 #include "cJSON.h"
 #include <list>
+#include <functional>
 #include "hometv.h"
 #include "cec.h"
 #include "wii.h"
@@ -30,6 +31,7 @@ uint16_t cec_physical_address;
 HomeTvCec device;
 bool wii_pair_request;
 nvs_handle config_nvs_handle;
+xTaskHandle change_tv_state_task_handle;
 
 void cec_loop(void* param);
 
@@ -63,6 +65,42 @@ void connect_wiFi()
   IPAddress ip = WiFi.localIP();
   Serial.print("IP Address: ");
   Serial.println(ip);
+}
+
+bool call_with_retry(std::function<bool()> f, int wait_ms)
+{
+  int retry = 0;
+  bool success;
+  do
+  {
+    if (retry != 0)
+    {
+      printf("control retry #%d\n", retry);
+      delay(wait_ms);
+    }
+    success = f();
+  } while (retry++ < MAX_COMMAND_RETRY && !success);
+
+  return success;
+}
+
+bool call_with_retry(std::function<void()> f, std::function<bool()> check, int check_wait_ms, int retry_wait_ms)
+{
+  int retry = 0;
+  bool success;
+  do
+  {
+    if (retry != 0)
+    {
+      printf("control retry #%d\n", retry);
+      delay(retry_wait_ms);
+    }
+    f();
+    delay(check_wait_ms);
+    success = check();
+  } while (retry++ < MAX_COMMAND_RETRY && !success);
+
+  return success;
 }
 
 void handle_404(AsyncWebServerRequest* request)
@@ -144,41 +182,64 @@ void handle_tv_play_get(AsyncWebServerRequest* request)
   request->send(response);
 }
 
-void set_tv_state(JsonVariant& doc, bool& tv_on, bool& tv_off)
+bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, bool atv = true)
 {
-  uint8_t cmd[] = { 0x8f };
-  uint8_t reply[CEC_MAX_MSG_SIZE];
-  int reply_size;
+  bool tv_on = and_mode;
 
-  tv_on = false;
-  tv_off = false;
+  auto check_device = [and_mode, &tv_on](int target_address) {
+    uint8_t reply[CEC_MAX_MSG_SIZE];
+    auto get_power_state = [target_address, &reply]() {
+      uint8_t cmd[] = { 0x8f };
+      int reply_size = CEC_MAX_MSG_SIZE;
+      return device.Control(target_address, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3;
+    };
 
-  reply_size = CEC_MAX_MSG_SIZE;
-  if (device.Control(CEC_TV_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
-  {
-    tv_on |= reply[2] == 0;
-    tv_off |= reply[2] != 0;
-  }
-  reply_size = CEC_MAX_MSG_SIZE;
-  if (device.Control(CEC_AUDIO_SYSTEM_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
-  {
-    tv_on |= reply[2] == 0;
-    tv_off |= reply[2] != 0;
-  }
-  reply_size = CEC_MAX_MSG_SIZE;
-  if (!tv_on && device.Control(CEC_PLAYBACK_DEVICE_1_ADDRESS, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3)
-  {
-    tv_on |= reply[2] == 0;
-    tv_off |= reply[2] != 0;
-  }
-  // printf("reply size %d\nreply:", reply_size);
-  // for (int i = 0; i < reply_size; i++)
-  // {
-  //   printf(" %02x", reply[i]);
-  // }
-  // printf("\n");
+    if (!tv_on || and_mode)
+    {
+      if (call_with_retry(get_power_state, 100))
+      {
+        //printf("reply %02x:%02x:%02x\n", reply[0], reply[1], reply[2]);
+        if (and_mode)
+        {
+          tv_on &= reply[2] == 0;
+        }
+        else
+        {
+          tv_on |= reply[2] == 0;
+        }
+      }
+      else
+      {
+        if (and_mode)
+        {
+          printf("control failed, assuming off\n");
+          tv_on = false;
+        }
+        else
+        {
+          printf("control failed, keeping tv_on=%u\n", tv_on);
+        }
+      }
+    }
+  };
 
-  doc["state"] = tv_on ? "on" : "off";
+  if (tv)
+  {
+    printf("tv on?\n");
+    check_device(CEC_TV_ADDRESS);
+  }
+  if (audio)
+  {
+    printf("avr on?\n");
+    check_device(CEC_AUDIO_SYSTEM_ADDRESS);
+  }
+  if (atv)
+  {
+    printf("atv on?\n");
+    check_device(CEC_PLAYBACK_DEVICE_1_ADDRESS);
+  }
+
+  return tv_on;
 }
 
 void handle_tv_get(AsyncWebServerRequest* request)
@@ -187,7 +248,7 @@ void handle_tv_get(AsyncWebServerRequest* request)
   auto doc = response->getRoot();
 
   doc["status"] = "ok";
-  set_tv_state(doc);
+  doc["state"] = combine_devices_state(false) ? "on" : "off";
 
   response->setLength();
   request->send(response);
@@ -218,30 +279,74 @@ void handle_wii_pair_get(AsyncWebServerRequest* request)
   request->send(response);
 }
 
+void change_tv_state_task(void* p)
+{
+  bool desired_state = (bool)(intptr_t)p;
+  void (*change_state)();
+
+  if (desired_state)
+  {
+    change_state = [] { device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON); };
+  }
+  else
+  {
+    change_state = [] { device.StandBy(); };
+  }
+
+  if (call_with_retry(change_state, [desired_state] { return combine_devices_state(desired_state) == desired_state; }, 10000, 1000))
+  {
+    printf("change_tv_state = %u succeeded\n", desired_state);
+  }
+  else
+  {
+    printf("change_tv_state = %u failed\n", desired_state);
+  }
+
+  change_tv_state_task_handle = NULL;
+  vTaskDelete(NULL);
+}
+
 void handle_tv_post(AsyncWebServerRequest* request, JsonVariant& json)
 {
   auto response = new PrettyAsyncJsonResponse(false, 256);
   auto doc = response->getRoot();
   const JsonObject& jsonObj = json.as<JsonObject>();
 
-  for (int i = 0; i < 5; i++)
+  if (jsonObj.containsKey("state"))
   {
-    if (jsonObj.containsKey("state"))
+    auto desired_state = false;
+    auto change_state = false;
+
+    //void (*change_state)() = NULL;
+
+    if (jsonObj["state"] == "on")
     {
-      if (jsonObj["state"] == "on")
-      {
-        printf("turn tv on\n");
-        device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
-      }
-      else if (jsonObj["state"] == "off")
-      {
-        printf("turn tv off\n");
-        device.StandBy();
-      }
+      printf("turn tv on\n");
+      change_state = true;
+      desired_state = true;
+      //change_state = [] { device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON); };
     }
-    bool tv_on = set_tv_state(doc);
+    else if (jsonObj["state"] == "off")
+    {
+      printf("turn tv off\n");
+      //change_state = [] { device.StandBy(); };
+      change_state = true;
+      desired_state = false;
+    }
+
+    if (change_state)
+    {
+      if (change_tv_state_task_handle != NULL)
+      {
+        vTaskDelete(change_tv_state_task_handle);
+        change_tv_state_task_handle = NULL;
+      }
+      xTaskCreate(change_tv_state_task, "change_tv_state", 8000, (void*)(intptr_t)desired_state, 1, &change_tv_state_task_handle);
+    }
   }
-  doc["status"] = "ok";
+
+  //doc["state"] = combine_devices_state(false) ? "on" : "off";
+  doc["status"] = "pending";
 
   response->setLength();
   request->send(response);
@@ -254,36 +359,53 @@ void handle_wii_post(AsyncWebServerRequest* request, JsonVariant& json)
   const JsonObject& jsonObj = json.as<JsonObject>();
 
   wii_power_status_t status = WII_POWER_STATUS_UNKNOWN;
+  wii_power_status_t (*change_state)() = NULL;
+  bool desired_av_state;
+  wii_power_state_t desired_wii_state;
 
-  int toggle_delay = 0;
   if (jsonObj.containsKey("state"))
   {
     if (jsonObj["state"] == "on")
     {
-      status = wii_power_on();
-      //portENTER_CRITICAL(&cecMux);
-      device.TvScreenOn();
-      device.SystemAudioModeRequest(0x4200);
-      device.SetSystemAudioMode(true);
-      //portEXIT_CRITICAL(&cecMux);
-      toggle_delay = 5000;
+      desired_wii_state = WII_POWER_STATE_ON;
+      desired_av_state = true;
+      change_state = [] {
+        auto status = wii_power_on();
+        //portENTER_CRITICAL(&cecMux);
+        device.TvScreenOn();
+        device.SystemAudioModeRequest(0x4200);
+        delay(5000);
+        //device.SetSystemAudioMode(true);
+        //portEXIT_CRITICAL(&cecMux);
+        return status;
+      };
     }
     else if (jsonObj["state"] == "off")
     {
-      status = wii_power_off();
-      //portENTER_CRITICAL(&cecMux);
-      device.StandBy();
-      //portEXIT_CRITICAL(&cecMux);
-      toggle_delay = 0;
+      desired_wii_state = WII_POWER_STATE_OFF;
+      desired_av_state = false;
+      change_state = [] {
+        auto status = wii_power_off();
+        //portENTER_CRITICAL(&cecMux);
+        device.StandBy();
+        //portEXIT_CRITICAL(&cecMux);
+        return status;
+      };
     }
   }
+
+  if (change_state != NULL)
+  {
+    if (!call_with_retry(change_state, [desired_av_state, desired_wii_state] 
+        { return wii_query_power_state() == desired_wii_state && 
+                 combine_devices_state(desired_av_state, true, true, false) == desired_av_state; }, 5000, 1000))
+    {
+      printf("wii control failed\n");
+    }
+  }
+
   doc["power_toggled"] = status == WII_POWER_STATUS_TOGGLED;
   doc["status"] = "ok";
-
-  if (status == WII_POWER_STATUS_TOGGLED)
-  {
-    delay(toggle_delay);
-  }
 
   if (status == WII_POWER_STATUS_ERROR)
   {
@@ -606,7 +728,7 @@ void setup()
   digitalWrite(ONBOARD_LED_GPIO, HIGH);
   pinMode(WII_PAIR_GPIO, INPUT_PULLUP);
   pinMode(HOTPLUG_GPIO, INPUT_PULLUP);
-  pinMode(CEC_GPIO_INPUT, INPUT);
+  pinMode(CEC_GPIO_INPUT, INPUT_PULLUP);
   pinMode(CEC_GPIO_OUTPUT, OUTPUT_OPEN_DRAIN);
   digitalWrite(CEC_GPIO_OUTPUT, HIGH);
   pinMode(ONBOARD_LED_GPIO, OUTPUT);
