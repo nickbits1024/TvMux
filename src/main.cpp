@@ -94,17 +94,11 @@ bool call_with_retry(std::function<void()> f, std::function<bool()> check, int c
     f();
     delay(check_wait_ms);
     success = check();
+    device.ClearPending();
   } while (retry++ < MAX_COMMAND_RETRY && !success);
 
   return success;
 }
-
-#if 0
-void handle_404(AsyncWebServerRequest* request)
-{
-  request->send(404);
-}
-#endif
 
 void complete_request(httpd_req_t* request, cJSON* response_doc)
 {
@@ -191,18 +185,19 @@ bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, boo
       return device.Control(target_address, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3;
     };
 
-    if (!tv_on || and_mode)
+    if ((!tv_on && !and_mode) || (tv_on && and_mode))
     {
       if (call_with_retry(get_power_state, 100))
       {
         //printf("reply %02x:%02x:%02x\n", reply[0], reply[1], reply[2]);
+        bool device_on = reply[2] == 0 || reply[2] == 2;
         if (and_mode)
         {
-          tv_on &= reply[2] == 0;
+          tv_on &= device_on;
         }
         else
         {
-          tv_on |= reply[2] == 0;
+          tv_on |= device_on;
         }
       }
       else
@@ -359,7 +354,7 @@ esp_err_t handle_tv_post(httpd_req_t* request)
 
     if (change_state != NULL)
     {
-      if (call_with_retry(change_state, [desired_state] { return combine_devices_state(desired_state) == desired_state; }, 10000, 1000))
+      if (call_with_retry(change_state, [desired_state] { return combine_devices_state(desired_state) == desired_state; }, 10000, 5000))
       {
         printf("change_tv_state = %u succeeded\n", desired_state);
       }

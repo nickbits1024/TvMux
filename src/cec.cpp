@@ -18,13 +18,13 @@ extern uint16_t cec_physical_address;
 
 
 HomeTvCec::HomeTvCec() :
-  pendingMessage(NULL),
+  pending_message(NULL),
   response_mux(portMUX_INITIALIZER_UNLOCKED),
   reply(NULL),
   reply_size(NULL),
   reply_address(-1)
 {
-  this->queueHandle = xQueueCreate(100, sizeof(CEC_MESSAGE*));
+  this->queue_handle = xQueueCreate(100, sizeof(CEC_MESSAGE*));
   request_sem = xSemaphoreCreateBinary();
   //response_sem = xSemaphoreCreateBinary();
   responded_sem = xSemaphoreCreateBinary();
@@ -173,7 +173,7 @@ void HomeTvCec::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
 //   msg->targetAddress = targetAddress;
 //   msg->size = count;
 //   memcpy(msg->data, buffer, count);
-//   xQueueSend(this->queueHandle, &msg, portMAX_DELAY);
+//   xQueueSend(this->queue_handle, &msg, portMAX_DELAY);
 // }
 
 void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, int count)
@@ -191,7 +191,7 @@ void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, in
   // }
   // printf("\n");
   
-  xQueueSend(this->queueHandle, &msg, portMAX_DELAY);
+  xQueueSend(this->queue_handle, &msg, portMAX_DELAY);
 }
 
 bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size)
@@ -251,39 +251,44 @@ bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_
 
 void HomeTvCec::Run()
 {
-  if (this->pendingMessage == NULL)
+  if (this->pending_message == NULL)
   {
     CEC_MESSAGE* msg;
-    if (xQueueReceive(this->queueHandle, &msg, 0) == pdTRUE)
+    if (xQueueReceive(this->queue_handle, &msg, 0) == pdTRUE)
     {
-      this->pendingMessage = msg;
+      this->pending_message = msg;
 
-      // printf("loaded %u ", this->pendingMessage->size);
-      // for (int i = 0; i < this->pendingMessage->size; i++)
+      // printf("loaded %u ", this->pending_message->size);
+      // for (int i = 0; i < this->pending_message->size; i++)
       // {
-      //   printf("%s%02x", i != 0 ? ":" : "", this->pendingMessage->data[i]);
+      //   printf("%s%02x", i != 0 ? ":" : "", this->pending_message->data[i]);
       // }
       // printf("\n");
     }
   }
 
-  if (this->pendingMessage != NULL)
+  if (this->pending_message != NULL)
   {
-    if (//(this->pendingMessage->fromAddress != -1 && CEC_Device::Transmit(this->pendingMessage->fromAddress, this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size)) ||
-      CEC_Device::TransmitFrame(this->pendingMessage->targetAddress, this->pendingMessage->data, this->pendingMessage->size))
+    if (//(this->pending_message->fromAddress != -1 && CEC_Device::Transmit(this->pending_message->fromAddress, this->pending_message->targetAddress, this->pending_message->data, this->pending_message->size)) ||
+      CEC_Device::TransmitFrame(this->pending_message->targetAddress, this->pending_message->data, this->pending_message->size))
     {
       // printf("transmitted ");
-      // for (int i = 0; i < this->pendingMessage->size; i++)
+      // for (int i = 0; i < this->pending_message->size; i++)
       // {
-      //   printf("%s%02x", i != 0 ? ":" : "", this->pendingMessage->data[i]);
+      //   printf("%s%02x", i != 0 ? ":" : "", this->pending_message->data[i]);
       // }
       // printf("\n");
-      delete this->pendingMessage;
-      this->pendingMessage = NULL;
+      delete this->pending_message;
+      this->pending_message = NULL;
     }
   }
 
   CEC_Device::Run();
+}
+
+void HomeTvCec::ClearPending()
+{
+  xQueueReset(this->queue_handle);
 }
 
 void HomeTvCec::StandBy()

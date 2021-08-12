@@ -54,8 +54,8 @@ struct CEC_MESSAGE
 class HomeTvCec : public CEC_Device
 {
 private:
-  xQueueHandle queueHandle;
-  CEC_MESSAGE* pendingMessage;
+  xQueueHandle queue_handle;
+  CEC_MESSAGE* pending_message;
 
   xSemaphoreHandle request_sem;
   portMUX_TYPE response_mux;
@@ -87,6 +87,7 @@ public:
   //void SetActiveSource(uint16_t addr);
   bool SystemAudioModeRequest(uint16_t addr);
   void UserControlPressed(int targetAddress, uint8_t userControl);
+  void ClearPending();
 };
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count);
