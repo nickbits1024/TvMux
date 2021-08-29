@@ -113,7 +113,7 @@ void pairing_task(void* p)
 {
     post_bt_packet(create_hci_write_scan_enable_packet(HCI_PAGE_SCAN_ENABLE | HCI_INQUIRY_SCAN_ENABLE));
 
-    for (int i = 0; i < 20 || wii_state == WII_PAIRING; i++)
+    for (int i = 0; i < 30 || wii_state == WII_PAIRING; i++)
     {
         // not really thread safe but close enough
         if (wii_state != WII_PAIRING_PENDING && wii_state != WII_PAIRING)
@@ -123,7 +123,10 @@ void pairing_task(void* p)
         }
         digitalWrite(ONBOARD_LED_GPIO, HIGH);
         delay(500);
-        digitalWrite(ONBOARD_LED_GPIO, LOW);
+        if (wii_state == WII_PAIRING_PENDING)
+        {
+            digitalWrite(ONBOARD_LED_GPIO, LOW);
+        }        
         delay(500);
     }
     if (wii_state == WII_PAIRING_PENDING)
