@@ -73,7 +73,6 @@ void queue_io_task(void* p)
                     xSemaphoreTake(all_controller_buffers_sem, portMAX_DELAY);
                     all_controller_buffers_sem_count--;
                 }
-
                 while (!esp_vhci_host_check_send_available());
                 esp_vhci_host_send_packet(env->packet, env->size);
             }

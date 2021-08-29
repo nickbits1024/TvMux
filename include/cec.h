@@ -5,7 +5,7 @@
 
 #define CEC_GPIO_INPUT        5
 #define CEC_GPIO_OUTPUT       17
-#define CEC_DEVICE_TYPE       CEC_Device::CDT_PLAYBACK_DEVICE
+#define CEC_DEVICE_TYPE       CEC_Device::CDT_TUNER
 #define CEC_MAX_MSG_SIZE      16
 #define CEC_MAX_HISTORY       64
 #define EDID_ADDRESS          0x50
