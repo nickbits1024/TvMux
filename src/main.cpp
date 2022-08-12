@@ -19,6 +19,10 @@
 //#define HOTPLUG_ANALOG_GPIO   36
 //#define HOTPLUG_LOW_VOLTAGE   0.4
 
+#define TV_HDMI_INPUT           1
+#define WII_HDMI_INPUT          2
+#define STEAM_HDMI_INPUT        4
+
 //std::list<std::string> history;
 uint16_t cec_physical_address;
 //volatile bool hdmi_unplugged;
@@ -410,7 +414,7 @@ esp_err_t handle_wii_post(httpd_req_t* request)
       change_state = [] {
         auto status = wii_power_on();
         device.TvScreenOn();
-        device.SystemAudioModeRequest(0x4200);
+        device.SystemAudioModeRequest(TV_HDMI_INPUT << 12 | WII_HDMI_INPUT << 8);
         delay(5000);
         //device.SetSystemAudioMode(true);
         return status;
