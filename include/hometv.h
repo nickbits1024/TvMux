@@ -7,4 +7,6 @@
 
 extern nvs_handle config_nvs_handle;
 
+esp_err_t cec_log_write(char direction, const uint8_t* buffer, uint8_t size, bool ack);
+
 #endif

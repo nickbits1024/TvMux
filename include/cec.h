@@ -7,16 +7,17 @@
 #define CEC_GPIO_OUTPUT       17
 #define CEC_DEVICE_TYPE       CEC_Device::CDT_TUNER
 #define CEC_MAX_MSG_SIZE      16
-#define CEC_MAX_HISTORY       64
+#define CEC_MAX_LOG_ENTRIES   256
 #define EDID_ADDRESS          0x50
 #define EDID_LENGTH           128
 #define EDID_EXTENSION_LENGTH 128
 #define EDID_EXTENSION_DATA_LENGTH  125
 #define EDID_EXTENSION_FLAG   0x7e
 
+#define CEC_SET_ACTIVE_SOURCE       0x82
 #define CEC_USER_CONTROL_PLAY       0x60
 #define CEC_USER_CONTROL_PAUSE      0x61
-#define CEC_USER_CONTROL_POWER_ON   0x6d
+#define CEC_USER_CONTROL_POWER_ON   0x6d 
 #define CEC_USER_CONTROL_POWER_OFF  0x6c
 
 #define CEC_REQUEST_WAIT               5000
@@ -24,70 +25,87 @@
 
 
 // CEC locical address handling
-typedef enum {
-  CEC_TV_ADDRESS = 0,
-  CEC_RECORDING_DEVICE_1_ADDRESS,
-  CEC_RECORDING_DEVICE_2_ADDRESS,
-  CEC_TUNER_1_ADDRESS,
-  CEC_PLAYBACK_DEVICE_1_ADDRESS,
-  CEC_AUDIO_SYSTEM_ADDRESS,
-  CEC_TUNER_2_ADDRESS,
-  CEC_TUNER_3_ADDRESS,
-  CEC_PLAYBACK_DEVICE_2_ADDRESS,
-  CEC_RECORDING_DEVICE_3_ADDRESS,
-  CEC_TUNER_4_ADDRESS,
-  CEC_PLAYBACK_DEVICE_3_ADDRESS,
-  CEC_RESERVED_1_ADDRESS,
-  CEC_RESERVED_2_ADDRESS,
-  CEC_FREE_USE_ADDRESS,
-  CEC_BROADCAST_ADDRESS
+typedef enum
+{
+    CEC_TV_ADDRESS = 0,
+    CEC_RECORDING_DEVICE_1_ADDRESS,
+    CEC_RECORDING_DEVICE_2_ADDRESS,
+    CEC_TUNER_1_ADDRESS,
+    CEC_PLAYBACK_DEVICE_1_ADDRESS,
+    CEC_AUDIO_SYSTEM_ADDRESS,
+    CEC_TUNER_2_ADDRESS,
+    CEC_TUNER_3_ADDRESS,
+    CEC_PLAYBACK_DEVICE_2_ADDRESS,
+    CEC_RECORDING_DEVICE_3_ADDRESS,
+    CEC_TUNER_4_ADDRESS,
+    CEC_PLAYBACK_DEVICE_3_ADDRESS,
+    CEC_RESERVED_1_ADDRESS,
+    CEC_RESERVED_2_ADDRESS,
+    CEC_FREE_USE_ADDRESS,
+    CEC_BROADCAST_ADDRESS
 } CEC_DEVICE_ADDRESS;
 
 struct CEC_MESSAGE
 {
-  //int fromAddress;
-  int targetAddress;
-  int size;
-  uint8_t data[CEC_MAX_MSG_SIZE];
+    //int fromAddress;
+    uint8_t targetAddress;
+    uint8_t size;
+    uint8_t data[CEC_MAX_MSG_SIZE];
 };
+
+struct CEC_LOG_ENTRY
+{
+    uint8_t direction;
+    uint8_t size;
+    bool ack;
+    uint8_t data[CEC_MAX_MSG_SIZE];
+};
+
+typedef std::list<CEC_LOG_ENTRY> log_entry_list;
 
 class HomeTvCec : public CEC_Device
 {
 private:
-  xQueueHandle queue_handle;
-  CEC_MESSAGE* pending_message;
+    xQueueHandle queue_handle;
+    CEC_MESSAGE* pending_message;
 
-  xSemaphoreHandle request_sem;
-  portMUX_TYPE response_mux;
-  xSemaphoreHandle responded_sem;
-  uint8_t* reply;
-  int* reply_size;
-  int reply_address;
-  uint8_t reply_filter;
+    xSemaphoreHandle request_sem;
+    portMUX_TYPE response_mux;
+    xSemaphoreHandle responded_sem;
+    portMUX_TYPE log_mux;
+    uint8_t* reply;
+    int* reply_size;
+    int reply_address;
+    uint8_t reply_filter;
+    log_entry_list log_entries;
+    uint16_t active_source;
 
 protected:
-  virtual bool LineState();
-  virtual void SetLineState(bool);
-  virtual void OnReady(int logicalAddress);
-  virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
-  virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
-  void TransmitFrame(int targetAddress, const uint8_t* buffer, int count);
-  //void TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count);
+    virtual bool LineState();
+    virtual void SetLineState(bool);
+    virtual void OnReady(int logicalAddress);
+    virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
+    virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
+    void TransmitFrame(int targetAddress, const uint8_t* buffer, int count);
+    //void TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count);
+    void PrintIO(char direction, unsigned char* buffer, int size, bool ack);
 
 public:
-  HomeTvCec();
+    HomeTvCec();
 
-  void Run();
+    void Run();
 
-  bool Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size);
+    bool Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size);
 
-  void StandBy();
-  void TvScreenOn();
-  //void SetSystemAudioMode(bool on);
-  //void SetActiveSource(uint16_t addr);
-  bool SystemAudioModeRequest(uint16_t addr);
-  void UserControlPressed(int targetAddress, uint8_t userControl);
-  void ClearPending();
+    void StandBy();
+    void TvScreenOn();
+    //void SetSystemAudioMode(bool on);
+    void SetActiveSource(uint16_t addr);
+    bool SystemAudioModeRequest(uint16_t addr);
+    void UserControlPressed(int targetAddress, uint8_t userControl);
+    void ClearPending();
+    void WriteLog(httpd_req_t* request);
+    void ClearLog();
 };
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count);
