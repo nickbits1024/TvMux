@@ -42,7 +42,9 @@
         "cinttypes": "cpp",
         "regex": "cpp",
         "utility": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "bthci.c": "cpp",
+        "btdump.c": "cpp"
     },
     "idf.portWin": "COM5"
 }

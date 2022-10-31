@@ -2,6 +2,10 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <WiFiClient.h>
+#include <ESP32Ping.h>
+#include <WiFiUdp.h>
+#include <WakeOnLan.h>
 #include <nvs_flash.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
@@ -18,23 +22,23 @@
 #define WIFI_PASS             "B16b00b5"
 
 #define HOTPLUG_GPIO          19
-//#define HOTPLUG_ANALOG_GPIO   36
-//#define HOTPLUG_LOW_VOLTAGE   0.4
 
 #define TV_HDMI_INPUT           1
 #define ATV_HDMI_INPUT          1
 #define WII_HDMI_INPUT          2
 #define STEAM_HDMI_INPUT        4
 
-//std::list<std::string> history;
+#define STEAM_PC_HOSTNAME       "seattle.home.nickpalmer.net"
+#define STEAM_PC_PORT           1410
+#define STEAM_PC_MAC            "58:11:22:B4:B6:D9"
+
 uint16_t cec_physical_address;
-//volatile bool hdmi_unplugged;
-//double last_hpd_time;
 HomeTvCec device;
 bool wii_pair_request;
 nvs_handle config_nvs_handle;
-//xTaskHandle change_tv_state_task_handle;
 httpd_handle_t http_server_handle;
+WiFiUDP UDP;
+WakeOnLan WOL(UDP);
 
 void cec_loop(void* param);
 
@@ -182,6 +186,10 @@ esp_err_t handle_tv_play_get(httpd_req_t* request)
 
 bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, bool atv = true)
 {
+#ifndef HDMI_CEC
+    return false;
+#endif
+
     bool tv_on = and_mode;
 
     auto check_device = [and_mode, &tv_on](int target_address) {
@@ -270,45 +278,6 @@ esp_err_t handle_wii_get(httpd_req_t* request)
     return ESP_OK;
 }
 
-// void handle_wii_pair_get(httpd_req_t* req)
-// {
-//   auto response = new PrettyAsyncJsonResponse(false, 256);
-//   auto doc = response->getRoot();
-
-//   wii_pair();
-//   doc["status"] = "started";
-
-//   response->setLength();
-//   request->send(response);
-// }
-
-// void change_tv_state_task(void* p)
-// {
-//   bool desired_state = (bool)(intptr_t)p;
-//   void (*change_state)();
-
-//   if (desired_state)
-//   {
-//     change_state = [] { device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON); };
-//   }
-//   else
-//   {
-//     change_state = [] { device.StandBy(); };
-//   }
-
-//   if (call_with_retry(change_state, [desired_state] { return combine_devices_state(desired_state) == desired_state; }, 10000, 1000))
-//   {
-//     printf("change_tv_state = %u succeeded\n", desired_state);
-//   }
-//   else
-//   {
-//     printf("change_tv_state = %u failed\n", desired_state);
-//   }
-
-//   change_tv_state_task_handle = NULL;
-//   vTaskDelete(NULL);
-// }
-
 cJSON* parse_request(httpd_req_t* request)
 {
     char json[MAX_REQUEST_SIZE];
@@ -375,12 +344,140 @@ esp_err_t handle_tv_post(httpd_req_t* request)
             {
                 printf("change_tv_state = %u failed\n", desired_state);
             }
-            // if (change_tv_state_task_handle != NULL)
-            // {
-            //   vTaskDelete(change_tv_state_task_handle);
-            //   change_tv_state_task_handle = NULL;
-            // }
-            // xTaskCreate(change_tv_state_task, "change_tv_state", 8000, (void*)(intptr_t)desired_state, 1, &change_tv_state_task_handle);
+        }
+    }
+
+    auto state_string = combine_devices_state(false) ? "on" : "off";
+
+    cJSON_AddStringToObject(response_doc, "state", state_string);
+    cJSON_AddStringToObject(response_doc, "status", "ok");
+
+    complete_request(request, response_doc);
+    cJSON_Delete(request_doc);
+
+    return ESP_OK;
+}
+
+bool steam_state(bool and_mode)
+{
+    auto state = combine_devices_state(and_mode, true, true, false);
+
+    if (and_mode)
+    {
+        if (state)
+        {
+            state &= Ping.ping(STEAM_PC_HOSTNAME);
+        }
+    }
+    else
+    {
+        if (!state)
+        {
+            state |= Ping.ping(STEAM_PC_HOSTNAME);
+        }
+    }
+     
+    return state;
+}
+
+void steam_power_on()
+{
+    for (int i = 0; i < 5; i++)
+    {
+        printf("send WOL (%d)\n", i + 1);
+        WOL.sendMagicPacket(STEAM_PC_MAC);
+        delay(2000);
+        if (Ping.ping(STEAM_PC_HOSTNAME))
+        {
+            printf("PC on!\n");
+            break;
+        }
+    }
+    WiFiClient cli;
+
+    if (cli.connect(STEAM_PC_HOSTNAME, STEAM_PC_PORT))
+    {
+        cli.println("GET /api/stream/bigpicture/start HTTP/1.0");
+        cli.println();       
+    }
+}
+
+void steam_power_off()
+{
+    WiFiClient cli;
+
+    if (cli.connect(STEAM_PC_HOSTNAME, STEAM_PC_PORT))
+    {
+        cli.println("GET /api/computer/off HTTP/1.0");
+        cli.println();        
+    }
+}
+
+esp_err_t handle_steam_get(httpd_req_t* request)
+{
+    auto state = steam_state(false) ? "on" : "off";
+
+    cJSON* response_doc = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(response_doc, "status", "ok");
+    cJSON_AddStringToObject(response_doc, "state", state);
+
+    complete_request(request, response_doc);
+
+    return ESP_OK;
+}
+
+esp_err_t handle_steam_post(httpd_req_t* request)
+{
+    auto request_doc = parse_request(request);
+    if (request_doc == NULL)
+    {
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
+    }
+
+    auto response_doc = cJSON_CreateObject();
+
+    cJSON* state = cJSON_GetObjectItem(request_doc, "state");
+
+    if (state != NULL)
+    {
+        auto state_value = cJSON_GetStringValue(state);
+        auto desired_state = false;
+        void (*change_state)() = NULL;
+
+        if (strcmp(state_value, "on") == 0)
+        {
+            printf("turn steam on\n");
+            desired_state = true;
+            change_state = [] {
+                steam_power_on();
+                uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
+                device.SetActiveSource(addr);
+                device.TvScreenOn();
+                device.SystemAudioModeRequest(addr);
+            };
+        }
+        else if (strcmp(state_value, "off") == 0)
+        {
+            printf("turn steam off\n");
+            desired_state = false;
+            change_state = [] { 
+                device.StandBy(); 
+                steam_power_off();
+            };
+        }
+
+        if (change_state != NULL)
+        {
+            if (call_with_retry(change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 10000, 5000))
+            {
+                printf("change_tv_state = %u succeeded\n", desired_state);
+            }
+            else
+            {
+                printf("change_tv_state = %u failed\n", desired_state);
+            }
         }
     }
 
@@ -426,7 +523,7 @@ esp_err_t handle_wii_post(httpd_req_t* request)
                 device.SetActiveSource(addr);
                 device.TvScreenOn();
                 device.SystemAudioModeRequest(addr);
-                delay(5000);
+                //delay(5000);
                 //device.SetSystemAudioMode(true);
                 return status;
             };
@@ -766,17 +863,6 @@ byte readI2CByte(byte data_addr)
     return data;
 }
 
-// void IRAM_ATTR on_hdmi_unplugged()
-// {
-//   //hdmi_unplugged = true;
-//   ESP.restart();
-// }
-
-// double get_hotplug_voltage()
-// {
-//   return analogRead(HOTPLUG_ANALOG_GPIO) * 5.0 / 4095.0;
-// }
-
 double uptimed()
 {
     return esp_timer_get_time() / 1000000.0;
@@ -822,15 +908,8 @@ void setup()
     Serial.println("Waiting for hotplug signal...");
     while (digitalRead(HOTPLUG_GPIO) == LOW) delay(50);
 
-    //double hpv = 0;
-    //while ((hpv = get_hotplug_voltage()) < HOTPLUG_LOW_VOLTAGE) delay(50);
-    //delay(500);
-
     Serial.printf("Hotplug signal detected!\n");
     //last_hpd_time = uptimed();
-
-    //delay(10000);
-    //attachInterrupt(digitalPinToInterrupt(HOTPLUG_GPIO), on_hdmi_unplugged, FALLING);
 
     Wire.begin();
     uint8_t edid[EDID_LENGTH];
@@ -896,6 +975,22 @@ void setup()
       .uri = "/tv",
       .method = HTTP_POST,
       .handler = handle_tv_post
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(http_server_handle, &httpd_uri));
+
+    httpd_uri =
+    {
+      .uri = "/steam",
+      .method = HTTP_GET,
+      .handler = handle_steam_get
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(http_server_handle, &httpd_uri));
+
+    httpd_uri =
+    {
+      .uri = "/steam",
+      .method = HTTP_POST,
+      .handler = handle_steam_post
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(http_server_handle, &httpd_uri));
 
