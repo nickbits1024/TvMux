@@ -8,6 +8,7 @@
 #define CEC_DEVICE_TYPE       CEC_Device::CDT_TUNER
 #define CEC_MAX_MSG_SIZE      16
 #define CEC_MAX_LOG_ENTRIES   256
+#define CEC_MAX_ADDRESS       0x0f
 #define EDID_ADDRESS          0x50
 #define EDID_LENGTH           128
 #define EDID_EXTENSION_LENGTH 128
@@ -19,10 +20,19 @@
 #define CEC_USER_CONTROL_PAUSE      0x61
 #define CEC_USER_CONTROL_POWER_ON   0x6d 
 #define CEC_USER_CONTROL_POWER_OFF  0x6c
+#define CEC_POWER_STATUS            0x90
 
 #define CEC_REQUEST_WAIT               5000
 #define CEC_RESPONSE_WAIT              1000
 
+enum CEC_POWER_STATE
+{
+    CEC_POWER_ON = 0x00,
+    CEC_POWER_OFF = 0x01,
+    CEC_POWER_TRANS_ON = 0x02,
+    CEC_POWER_TRANS_OFF = 0x03,
+    INVALID_POWER_STATE = 0xff
+};
 
 // CEC locical address handling
 typedef enum
@@ -72,13 +82,14 @@ private:
     xSemaphoreHandle request_sem;
     portMUX_TYPE response_mux;
     xSemaphoreHandle responded_sem;
-    portMUX_TYPE log_mux;
+    portMUX_TYPE state_mux;
     uint8_t* reply;
     int* reply_size;
     int reply_address;
     uint8_t reply_filter;
     log_entry_list log_entries;
     uint16_t active_source;
+    uint8_t power_states[CEC_MAX_ADDRESS + 1];
 
 protected:
     virtual bool LineState();
@@ -106,6 +117,7 @@ public:
     void ClearPending();
     void WriteLog(httpd_req_t* request);
     void ClearLog();
+    CEC_POWER_STATE GetPowerState(uint8_t addr);
 };
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count);

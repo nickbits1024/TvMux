@@ -24,11 +24,15 @@ extern uint16_t cec_physical_address;
 HomeTvCec::HomeTvCec() :
     pending_message(NULL),
     response_mux(portMUX_INITIALIZER_UNLOCKED),
-    log_mux(portMUX_INITIALIZER_UNLOCKED),
+    state_mux(portMUX_INITIALIZER_UNLOCKED),
     reply(NULL),
     reply_size(NULL),
     reply_address(-1),
-    active_source(-1)
+    active_source(-1),
+    power_states { CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, 
+                   CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, 
+                   CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, 
+                   CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF }
 {
     this->queue_handle = xQueueCreate(100, sizeof(CEC_MESSAGE*));
     request_sem = xSemaphoreCreateBinary();
@@ -94,7 +98,7 @@ void format_bytes(std::string& s, unsigned char* buffer, int count)
 }
 
 void HomeTvCec::PrintIO(char direction, unsigned char* buffer, int size, bool ack)
-{    
+{
     if (size >= 256)
     {
         return;
@@ -111,7 +115,7 @@ void HomeTvCec::PrintIO(char direction, unsigned char* buffer, int size, bool ac
     }
     printf("\n");
 
-    portENTER_CRITICAL(&this->log_mux);
+    portENTER_CRITICAL(&this->state_mux);
 
     while (this->log_entries.size() >= CEC_MAX_LOG_ENTRIES)
     {
@@ -124,7 +128,7 @@ void HomeTvCec::PrintIO(char direction, unsigned char* buffer, int size, bool ac
     memcpy(entry.data, buffer, size);
 
     this->log_entries.push_back(entry);
-    portEXIT_CRITICAL(&this->log_mux);
+    portEXIT_CRITICAL(&this->state_mux);
 }
 
 void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
@@ -135,20 +139,33 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
 
     PrintIO('r', buffer, size, ack);
 
-    if (buffer[1] == CEC_SET_ACTIVE_SOURCE)
-    {
-        ESP_LOGI(TAG, "TV trying to steal active source!");
+    int8_t addr;
 
-        if (this->active_source != -1)
+    switch (buffer[1])
+    {
+        case CEC_SET_ACTIVE_SOURCE:
         {
-            ESP_LOGI(TAG, "Restoring source %02x", this->active_source);
-            SetActiveSource(this->active_source);
+            ESP_LOGI(TAG, "TV trying to steal active source!");
+
+            if (this->active_source != -1)
+            {
+                ESP_LOGI(TAG, "Restoring source %02x", this->active_source);
+                SetActiveSource(this->active_source);
+            }
+            else
+            {
+                this->active_source = buffer[2] << 8 | buffer[3];
+                ESP_LOGI(TAG, "Saving source %02x", this->active_source);
+            }
+            break;
         }
-        else
-        {
-            this->active_source = buffer[2] << 8 | buffer[3];
-            ESP_LOGI(TAG, "Saving source %02x", this->active_source);
-        }
+        case CEC_POWER_STATUS:
+            portENTER_CRITICAL(&state_mux);    
+            addr = buffer[0] >> 4;
+            this->power_states[addr] = buffer[2];
+            portEXIT_CRITICAL(&state_mux);
+            ets_printf("addr 0x%02x power state = %u\n", addr, buffer[2]);
+            break;
     }
 
     // Ignore messages not sent to us
@@ -389,14 +406,14 @@ void HomeTvCec::UserControlPressed(int targetAddress, uint8_t userControl)
 
 void HomeTvCec::WriteLog(httpd_req_t* request)
 {
-    portENTER_CRITICAL(&this->log_mux);
+    portENTER_CRITICAL(&this->state_mux);
     log_entry_list entries_copy(this->log_entries);
-    portEXIT_CRITICAL(&this->log_mux);
+    portEXIT_CRITICAL(&this->state_mux);
 
     char buf[32];
 
     for (log_entry_list::iterator it = entries_copy.begin(); it != entries_copy.end(); it++)
-    {  
+    {
         CEC_LOG_ENTRY& entry = *it;
         snprintf(buf, sizeof(buf), "%cx:", entry.direction);
         httpd_resp_send_chunk(request, buf, 3);
@@ -410,7 +427,7 @@ void HomeTvCec::WriteLog(httpd_req_t* request)
             httpd_resp_send_chunk(request, " !", 2);
         }
         httpd_resp_send_chunk(request, "\n", 1);
-    }    
+    }
 
     httpd_resp_send_chunk(request, "END", 3);
     httpd_resp_send_chunk(request, NULL, 0);
@@ -418,7 +435,21 @@ void HomeTvCec::WriteLog(httpd_req_t* request)
 
 void HomeTvCec::ClearLog()
 {
-    portENTER_CRITICAL(&this->log_mux);
+    portENTER_CRITICAL(&this->state_mux);
     this->log_entries.clear();
-    portEXIT_CRITICAL(&this->log_mux);
+    portEXIT_CRITICAL(&this->state_mux);
+}
+
+CEC_POWER_STATE HomeTvCec::GetPowerState(uint8_t addr)
+{
+    if (addr > CEC_MAX_ADDRESS)
+    {
+        return INVALID_POWER_STATE;
+    }
+    
+    portENTER_CRITICAL(&this->state_mux);
+    uint8_t power_state = this->power_states[addr];
+    portEXIT_CRITICAL(&this->state_mux);
+
+    return (CEC_POWER_STATE)power_state;
 }

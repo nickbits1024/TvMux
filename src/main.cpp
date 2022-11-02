@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <WiFiClient.h>
+#include <HTTPClient.h>
 #include <ESP32Ping.h>
 #include <WiFiUdp.h>
 #include <WakeOnLan.h>
@@ -39,6 +40,7 @@ nvs_handle config_nvs_handle;
 httpd_handle_t http_server_handle;
 WiFiUDP UDP;
 WakeOnLan WOL(UDP);
+bool device_state[CEC_MAX_ADDRESS + 1];
 
 void cec_loop(void* param);
 
@@ -190,43 +192,58 @@ bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, boo
     return false;
 #endif
 
-    bool tv_on = and_mode;
+    bool combined_on = and_mode;
 
-    auto check_device = [and_mode, &tv_on](int target_address) {
-        uint8_t reply[CEC_MAX_MSG_SIZE];
-        auto get_power_state = [target_address, &reply]() {
-            uint8_t cmd[] = { 0x8f };
-            int reply_size = CEC_MAX_MSG_SIZE;
-            return device.Control(target_address, cmd, sizeof(cmd), 0x90, reply, &reply_size) && reply_size == 3;
-        };
+    // auto check_device = [and_mode, &tv_on](int target_address) {
+    //     uint8_t reply[CEC_MAX_MSG_SIZE];
+    //     auto get_power_state = [target_address, &reply]() {
+    //         uint8_t cmd[] = { 0x8f };
+    //         int reply_size = CEC_MAX_MSG_SIZE;
+    //         return device.Control(target_address, cmd, sizeof(cmd), CEC_POWER_STATUS, reply, &reply_size) && reply_size == 3;
+    //     };
 
-        if ((!tv_on && !and_mode) || (tv_on && and_mode))
+    //     if ((!tv_on && !and_mode) || (tv_on && and_mode))
+    //     {
+    //         if (call_with_retry(get_power_state, 100))
+    //         {
+    //             //printf("reply %02x:%02x:%02x\n", reply[0], reply[1], reply[2]);
+    //             bool device_on = reply[2] == 0 || reply[2] == 2;
+    //             if (and_mode)
+    //             {
+    //                 tv_on &= device_on;
+    //             }
+    //             else
+    //             {
+    //                 tv_on |= device_on;
+    //             }
+    //         }
+    //         else
+    //         {
+    //             if (and_mode)
+    //             {
+    //                 printf("control failed, assuming off\n");
+    //                 tv_on = false;
+    //             }
+    //             else
+    //             {
+    //                 printf("control failed, keeping tv_on=%u\n", tv_on);
+    //             }
+    //         }
+    //     }
+    // };
+
+    auto check_device = [and_mode, &combined_on](int target_address) {
+
+        auto power_state = device.GetPowerState(target_address);
+        bool device_on = power_state == CEC_POWER_ON || power_state == CEC_POWER_TRANS_ON;
+
+        if (and_mode)
         {
-            if (call_with_retry(get_power_state, 100))
-            {
-                //printf("reply %02x:%02x:%02x\n", reply[0], reply[1], reply[2]);
-                bool device_on = reply[2] == 0 || reply[2] == 2;
-                if (and_mode)
-                {
-                    tv_on &= device_on;
-                }
-                else
-                {
-                    tv_on |= device_on;
-                }
-            }
-            else
-            {
-                if (and_mode)
-                {
-                    printf("control failed, assuming off\n");
-                    tv_on = false;
-                }
-                else
-                {
-                    printf("control failed, keeping tv_on=%u\n", tv_on);
-                }
-            }
+            combined_on &= device_on;
+        }
+        else
+        {
+            combined_on |= device_on;
         }
     };
 
@@ -246,7 +263,7 @@ bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, boo
         check_device(CEC_PLAYBACK_DEVICE_1_ADDRESS);
     }
 
-    return tv_on;
+    return combined_on;
 }
 
 esp_err_t handle_tv_get(httpd_req_t* request)
@@ -367,6 +384,8 @@ bool steam_state(bool and_mode)
         if (state)
         {
             state &= Ping.ping(STEAM_PC_HOSTNAME);
+
+            
         }
     }
     else
@@ -393,13 +412,26 @@ void steam_power_on()
             break;
         }
     }
-    WiFiClient cli;
+    //WiFiClient cli;
+    HTTPClient http;
 
-    if (cli.connect(STEAM_PC_HOSTNAME, STEAM_PC_PORT))
+    String host(STEAM_PC_HOSTNAME);
+    uint16_t port = STEAM_PC_PORT;
+    String path("/api/stream/bigpicture/start");
+   
+    //http.useHTTP10();
+    http.begin(host, port, path);
+    if (http.GET() == 0)
     {
-        cli.println("GET /api/stream/bigpicture/start HTTP/1.0");
-        cli.println();       
+        auto json = http.getString();
+
     }
+    http.end();
+    // if (cli.connect(STEAM_PC_HOSTNAME, STEAM_PC_PORT))
+    // {
+    //     cli.println("GET /api/stream/bigpicture/start HTTP/1.0");
+    //     cli.println();
+    // }
 }
 
 void steam_power_off()
@@ -451,10 +483,10 @@ esp_err_t handle_steam_post(httpd_req_t* request)
             printf("turn steam on\n");
             desired_state = true;
             change_state = [] {
+                device.TvScreenOn();
                 steam_power_on();
                 uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
                 device.SetActiveSource(addr);
-                device.TvScreenOn();
                 device.SystemAudioModeRequest(addr);
             };
         }
@@ -481,7 +513,7 @@ esp_err_t handle_steam_post(httpd_req_t* request)
         }
     }
 
-    auto state_string = combine_devices_state(false) ? "on" : "off";
+    auto state_string = steam_state(false) ? "on" : "off";
 
     cJSON_AddStringToObject(response_doc, "state", state_string);
     cJSON_AddStringToObject(response_doc, "status", "ok");
