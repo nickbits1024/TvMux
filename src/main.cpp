@@ -443,10 +443,10 @@ bool steam_state(bool and_mode)
         {
             state |= Ping.ping(STEAM_PC_HOSTNAME);
         }
-        if (!state)
-        {
-            state |= check_steam_topology();
-        }
+        // if (!state)
+        // {
+        //     state |= check_steam_topology();
+        // }
     }
     ESP_LOGI(TAG, "steam status end %d", state);
      
