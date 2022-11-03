@@ -118,6 +118,7 @@ public:
     void WriteLog(httpd_req_t* request);
     void ClearLog();
     CEC_POWER_STATE GetPowerState(uint8_t addr);
+    void LoadPowerState(uint8_t addr);
 };
 
 void format_bytes(std::stringstream& ss, unsigned char* buffer, int count);

@@ -453,3 +453,12 @@ CEC_POWER_STATE HomeTvCec::GetPowerState(uint8_t addr)
 
     return (CEC_POWER_STATE)power_state;
 }
+
+void HomeTvCec::LoadPowerState(uint8_t addr)
+{
+    uint8_t reply[CEC_MAX_MSG_SIZE];
+    uint8_t cmd[] = { 0x8f };
+    int reply_size = CEC_MAX_MSG_SIZE;
+    
+    Control(addr, cmd, sizeof(cmd), CEC_POWER_STATUS, reply, &reply_size);
+}

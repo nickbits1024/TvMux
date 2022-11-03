@@ -33,6 +33,8 @@
 #define STEAM_PC_PORT           1410
 #define STEAM_PC_MAC            "58:11:22:B4:B6:D9"
 
+#define HTTP_SUCCESS(http_code) ((http_code) >= 200 && (http_code) <= 299)
+
 uint16_t cec_physical_address;
 HomeTvCec device;
 bool wii_pair_request;
@@ -101,7 +103,7 @@ bool call_with_retry(std::function<void()> f, std::function<bool()> check, int c
     {
         if (retry != 0)
         {
-            printf("control retry #%d\n", retry);
+            printf("control retry #%d in %dms\n", retry, retry_wait_ms);
             delay(retry_wait_ms);
         }
         f();
@@ -375,17 +377,64 @@ esp_err_t handle_tv_post(httpd_req_t* request)
     return ESP_OK;
 }
 
+bool check_steam_topology()
+{
+    bool external = false;
+
+    HTTPClient http;
+
+    String host(STEAM_PC_HOSTNAME);
+    uint16_t port = STEAM_PC_PORT;
+    String path("/api/monitor/topology");
+   
+    http.setTimeout(30000);
+    http.begin(host, port, path);
+    int http_code;
+    if (HTTP_SUCCESS(http_code = http.GET()))
+    {
+        auto json = http.getString();
+        cJSON* doc = cJSON_Parse(json.c_str());
+        if (doc != NULL)
+        {
+            auto topology_prop = cJSON_GetObjectItem(doc, "topology");
+            if (topology_prop != NULL)
+            {
+                auto topology_value = cJSON_GetStringValue(topology_prop);
+                if (topology_value != NULL)
+                {
+                    external = strcasecmp(topology_value, "External") == 0;
+                    ESP_LOGI(TAG, "topology: %s", topology_value);
+                }
+            }
+            cJSON_Delete(doc);
+        }
+    }
+    else
+    {
+        ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
+    }
+    http.end();
+
+    return external;
+}
+
 bool steam_state(bool and_mode)
 {
     auto state = combine_devices_state(and_mode, true, true, false);
+
+    ESP_LOGI(TAG, "steam status start %d", state);
 
     if (and_mode)
     {
         if (state)
         {
             state &= Ping.ping(STEAM_PC_HOSTNAME);
-
-            
+        ESP_LOGI(TAG, "steam status ping %d", state);            
+        }
+        if (state)
+        {
+            state &= check_steam_topology();
+            ESP_LOGI(TAG, "steam status topology %d", state);            
         }
     }
     else
@@ -394,55 +443,82 @@ bool steam_state(bool and_mode)
         {
             state |= Ping.ping(STEAM_PC_HOSTNAME);
         }
+        if (!state)
+        {
+            state |= check_steam_topology();
+        }
     }
+    ESP_LOGI(TAG, "steam status end %d", state);
      
     return state;
 }
 
 void steam_power_on()
 {
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 10; i++)
     {
+        if (Ping.ping(STEAM_PC_HOSTNAME))
+        {
+            if (i == 0)
+            {
+                ESP_LOGI(TAG, "PC was on!");
+            }
+            else
+            {
+                delay(5000);
+                ESP_LOGI(TAG, "PC now on!");
+            }
+            
+
+            break;
+        }
         printf("send WOL (%d)\n", i + 1);
         WOL.sendMagicPacket(STEAM_PC_MAC);
         delay(2000);
-        if (Ping.ping(STEAM_PC_HOSTNAME))
-        {
-            printf("PC on!\n");
-            break;
-        }
     }
-    //WiFiClient cli;
+
     HTTPClient http;
 
     String host(STEAM_PC_HOSTNAME);
     uint16_t port = STEAM_PC_PORT;
-    String path("/api/stream/bigpicture/start");
+    String path("/api/steam/bigpicture/start");
    
-    //http.useHTTP10();
+    int http_code;
+    http.setTimeout(30000);
     http.begin(host, port, path);
-    if (http.GET() == 0)
+    if (HTTP_SUCCESS(http_code = http.GET()))
     {
         auto json = http.getString();
-
+        ESP_LOGI(TAG, "%s: %s", path.c_str(), json.c_str());      
+    }
+    else
+    {
+        ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
     }
     http.end();
-    // if (cli.connect(STEAM_PC_HOSTNAME, STEAM_PC_PORT))
-    // {
-    //     cli.println("GET /api/stream/bigpicture/start HTTP/1.0");
-    //     cli.println();
-    // }
 }
 
 void steam_power_off()
 {
-    WiFiClient cli;
+    HTTPClient http;
 
-    if (cli.connect(STEAM_PC_HOSTNAME, STEAM_PC_PORT))
+    String host(STEAM_PC_HOSTNAME);
+    uint16_t port = STEAM_PC_PORT;
+    String path("/api/computer/off");
+   
+    int http_code;
+    http.setTimeout(30000);
+    http.begin(host, port, path);
+    if (HTTP_SUCCESS(http_code = http.GET()))
     {
-        cli.println("GET /api/computer/off HTTP/1.0");
-        cli.println();        
+        auto json = http.getString();
+        ESP_LOGI(TAG, "%s: %s", path.c_str(), json.c_str());      
     }
+    else
+    {
+        ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
+    }
+    http.end();
 }
 
 esp_err_t handle_steam_get(httpd_req_t* request)
@@ -480,9 +556,9 @@ esp_err_t handle_steam_post(httpd_req_t* request)
 
         if (strcmp(state_value, "on") == 0)
         {
-            printf("turn steam on\n");
             desired_state = true;
             change_state = [] {
+                printf("turn steam on\n");
                 device.TvScreenOn();
                 steam_power_on();
                 uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
@@ -492,9 +568,9 @@ esp_err_t handle_steam_post(httpd_req_t* request)
         }
         else if (strcmp(state_value, "off") == 0)
         {
-            printf("turn steam off\n");
             desired_state = false;
             change_state = [] { 
+                printf("turn steam off\n");
                 device.StandBy(); 
                 steam_power_off();
             };
@@ -1082,7 +1158,13 @@ void setup()
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(http_server_handle, &httpd_uri));
 
+
+    device.LoadPowerState(CEC_TV_ADDRESS);
+    device.LoadPowerState(CEC_AUDIO_SYSTEM_ADDRESS);
+    device.LoadPowerState(CEC_PLAYBACK_DEVICE_1_ADDRESS);
+
     digitalWrite(ONBOARD_LED_GPIO, LOW);
+
 }
 
 void loop()
