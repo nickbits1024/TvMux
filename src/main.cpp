@@ -32,6 +32,7 @@
 #define STEAM_PC_HOSTNAME       "seattle.home.nickpalmer.net"
 #define STEAM_PC_PORT           1410
 #define STEAM_PC_MAC            "58:11:22:B4:B6:D9"
+#define STEAM_PC_PING_COUNT     3
 
 #define HTTP_SUCCESS(http_code) ((http_code) >= 200 && (http_code) <= 299)
 
@@ -428,7 +429,7 @@ bool steam_state(bool and_mode)
     {
         if (state)
         {
-            state &= Ping.ping(STEAM_PC_HOSTNAME);
+            state &= Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
         ESP_LOGI(TAG, "steam status ping %d", state);            
         }
         if (state)
@@ -441,7 +442,7 @@ bool steam_state(bool and_mode)
     {
         if (!state)
         {
-            state |= Ping.ping(STEAM_PC_HOSTNAME);
+            state |= Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
         }
         // if (!state)
         // {
@@ -457,7 +458,7 @@ void steam_power_on()
 {
     for (int i = 0; i < 10; i++)
     {
-        if (Ping.ping(STEAM_PC_HOSTNAME))
+        if (Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT))
         {
             if (i == 0)
             {
@@ -560,6 +561,7 @@ esp_err_t handle_steam_post(httpd_req_t* request)
             change_state = [] {
                 printf("turn steam on\n");
                 device.TvScreenOn();
+                delay(5000);
                 steam_power_on();
                 uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
                 device.SetActiveSource(addr);
