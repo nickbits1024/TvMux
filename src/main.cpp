@@ -454,30 +454,28 @@ bool steam_state(bool and_mode)
     return state;
 }
 
-void steam_power_on()
+bool steam_is_on()
+{
+    return Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
+}
+
+bool steam_power_on()
 {
     for (int i = 0; i < 10; i++)
     {
-        if (Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT))
+        if (steam_is_on())
         {
-            if (i == 0)
-            {
-                ESP_LOGI(TAG, "PC was on!");
-            }
-            else
-            {
-                delay(5000);
-                ESP_LOGI(TAG, "PC now on!");
-            }
-            
-
-            break;
+            return true;
         }
         printf("send WOL (%d)\n", i + 1);
         WOL.sendMagicPacket(STEAM_PC_MAC);
         delay(2000);
     }
+    return false;
+}
 
+void steam_start()
+{
     HTTPClient http;
 
     String host(STEAM_PC_HOSTNAME);
@@ -559,13 +557,23 @@ esp_err_t handle_steam_post(httpd_req_t* request)
         {
             desired_state = true;
             change_state = [] {
-                printf("turn steam on\n");
-                device.TvScreenOn();
-                delay(5000);
-                steam_power_on();
                 uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
+                ESP_LOGI(TAG, "powering on steam...");
+                if (!steam_is_on())
+                {
+                    ESP_LOGI(TAG, "pc off, powering on...");
+                    if (!steam_power_on())
+                    {
+                        return;
+                    }
+                    delay(15000);
+                }
                 device.SetActiveSource(addr);
-                device.SystemAudioModeRequest(addr);
+                device.SystemAudioModeRequest(addr);               
+                delay(20000);
+                ESP_LOGI(TAG, "opening steam...");
+                steam_start();
+                device.TvScreenOn();
             };
         }
         else if (strcmp(state_value, "off") == 0)
