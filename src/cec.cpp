@@ -9,16 +9,9 @@
 #include "cec.h"
 #include "hometv.h"
 
-//extern std::list<std::string> history;
 extern uint16_t cec_physical_address;
-//extern portMUX_TYPE cecMux;
-//extern portMUX_TYPE historyMux;
-// extern xSemaphoreHandle response_sem;
-// extern xSemaphoreHandle responded_sem;
-// extern unsigned char reply[CEC_MAX_MSG_SIZE];
-// extern int reply_length;
-// extern unsigned char reply_filter;
-// extern int reply_address;
+
+#define TAG "cec"
 
 
 HomeTvCec::HomeTvCec() :
@@ -139,7 +132,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
 
     PrintIO('r', buffer, size, ack);
 
-    int8_t addr;
+    uint8_t source_addr = buffer[0] >> 4;
 
     switch (buffer[1])
     {
@@ -147,24 +140,25 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
         {
             ESP_LOGI(TAG, "TV trying to steal active source!");
 
-            if (this->active_source != -1)
+            uint16_t active_source = buffer[2] << 8 | buffer[3];
+
+            if (this->active_source != -1 && this->active_source != active_source && source_addr == CEC_TV_ADDRESS)
             {
                 ESP_LOGI(TAG, "Restoring source %02x", this->active_source);
                 SetActiveSource(this->active_source);
             }
-            else
+            else if (this->active_source != active_source)
             {
-                this->active_source = buffer[2] << 8 | buffer[3];
                 ESP_LOGI(TAG, "Saving source %02x", this->active_source);
+                this->active_source = active_source;
             }
             break;
         }
         case CEC_POWER_STATUS:
             portENTER_CRITICAL(&state_mux);    
-            addr = buffer[0] >> 4;
-            this->power_states[addr] = buffer[2];
+            this->power_states[source_addr] = buffer[2];
             portEXIT_CRITICAL(&state_mux);
-            ets_printf("addr 0x%02x power state = %u\n", addr, buffer[2]);
+            ets_printf("addr 0x%02x power state = %u\n", source_addr, buffer[2]);
             break;
     }
 

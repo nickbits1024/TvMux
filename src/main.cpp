@@ -17,6 +17,8 @@
 #include "cec.h"
 #include "wii.h"
 
+#define TAG "main"
+
 #define HDMI_CEC
 
 #define WIFI_SSID             "wifi.nickpalmer.net"
@@ -430,7 +432,7 @@ bool steam_state(bool and_mode)
         if (state)
         {
             state &= Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
-        ESP_LOGI(TAG, "steam status ping %d", state);            
+            ESP_LOGI(TAG, "steam status ping %d", state);            
         }
         if (state)
         {
@@ -566,11 +568,11 @@ esp_err_t handle_steam_post(httpd_req_t* request)
                     {
                         return;
                     }
-                    delay(15000);
+                    delay(10000);
                 }
                 device.SetActiveSource(addr);
                 device.SystemAudioModeRequest(addr);               
-                delay(20000);
+                delay(10000);
                 ESP_LOGI(TAG, "opening steam...");
                 steam_start();
                 device.TvScreenOn();
@@ -588,7 +590,7 @@ esp_err_t handle_steam_post(httpd_req_t* request)
 
         if (change_state != NULL)
         {
-            if (call_with_retry(change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 10000, 5000))
+            if (call_with_retry(change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 2000, 5000))
             {
                 printf("change_tv_state = %u succeeded\n", desired_state);
             }
