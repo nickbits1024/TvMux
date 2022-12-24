@@ -138,13 +138,11 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
     {
         case CEC_SET_ACTIVE_SOURCE:
         {
-            ESP_LOGI(TAG, "TV trying to steal active source!");
-
             uint16_t active_source = buffer[2] << 8 | buffer[3];
 
             if (this->active_source != -1 && this->active_source != active_source && source_addr == CEC_TV_ADDRESS)
             {
-                ESP_LOGI(TAG, "Restoring source %02x", this->active_source);
+                ESP_LOGI(TAG, "TV trying to steal active source, restoring source %02x", this->active_source);
                 SetActiveSource(this->active_source);
             }
             else if (this->active_source != active_source)
