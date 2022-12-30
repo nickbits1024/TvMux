@@ -34,7 +34,7 @@
 #define STEAM_PC_HOSTNAME       "seattle.home.nickpalmer.net"
 #define STEAM_PC_PORT           1410
 #define STEAM_PC_MAC            "58:11:22:B4:B6:D9"
-#define STEAM_PC_PING_COUNT     3
+#define STEAM_PC_PING_COUNT     2
 
 #define HTTP_SUCCESS(http_code) ((http_code) >= 200 && (http_code) <= 299)
 
@@ -421,6 +421,52 @@ bool check_steam_topology()
     return external;
 }
 
+bool steam_is_on()
+{
+    return Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
+}
+
+bool steam_is_open()
+{
+    bool open = false;
+
+    HTTPClient http;
+
+    String host(STEAM_PC_HOSTNAME);
+    uint16_t port = STEAM_PC_PORT;
+    String path("/api/steam/status");
+   
+    http.setTimeout(30000);
+    http.begin(host, port, path);
+    int http_code;
+    if (HTTP_SUCCESS(http_code = http.GET()))
+    {
+        auto json = http.getString();
+        cJSON* doc = cJSON_Parse(json.c_str());
+        if (doc != NULL)
+        {
+            auto status_prop = cJSON_GetObjectItem(doc, "steamStatus");
+            if (status_prop != NULL)
+            {
+                auto status_value = cJSON_GetStringValue(status_prop);
+                if (status_value != NULL)
+                {
+                    open = strcasecmp(status_value, "Open") == 0;
+                    ESP_LOGI(TAG, "open: %s", status_value);
+                }
+            }
+            cJSON_Delete(doc);
+        }
+    }
+    else
+    {
+        ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
+    }
+    http.end();
+
+    return open;
+}
+
 bool steam_state(bool and_mode)
 {
     auto state = combine_devices_state(and_mode, true, true, false);
@@ -452,14 +498,15 @@ bool steam_state(bool and_mode)
         // }
     }
     ESP_LOGI(TAG, "steam status end %d", state);
+
+    if (state && !steam_is_open())
+    {
+        state = false;
+    }
      
     return state;
 }
 
-bool steam_is_on()
-{
-    return Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
-}
 
 bool steam_power_on()
 {
@@ -483,6 +530,29 @@ void steam_start()
     String host(STEAM_PC_HOSTNAME);
     uint16_t port = STEAM_PC_PORT;
     String path("/api/steam/bigpicture/start");
+   
+    int http_code;
+    http.setTimeout(30000);
+    http.begin(host, port, path);
+    if (HTTP_SUCCESS(http_code = http.GET()))
+    {
+        auto json = http.getString();
+        ESP_LOGI(TAG, "%s: %s", path.c_str(), json.c_str());      
+    }
+    else
+    {
+        ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
+    }
+    http.end();
+}
+
+void steam_close()
+{
+    HTTPClient http;
+
+    String host(STEAM_PC_HOSTNAME);
+    uint16_t port = STEAM_PC_PORT;
+    String path("/api/steam/close");
    
     int http_code;
     http.setTimeout(30000);
@@ -584,6 +654,7 @@ esp_err_t handle_steam_post(httpd_req_t* request)
             change_state = [] { 
                 printf("turn steam off\n");
                 device.StandBy(); 
+                steam_close();
                 steam_power_off();
             };
         }
