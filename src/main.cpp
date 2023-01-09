@@ -12,6 +12,7 @@
 #include <esp_http_server.h>
 #include "cJSON.h"
 #include <list>
+#include <atomic>
 #include <functional>
 #include "hometv.h"
 #include "cec.h"
@@ -36,6 +37,14 @@
 #define STEAM_PC_MAC            "58:11:22:B4:B6:D9"
 #define STEAM_PC_PING_COUNT     2
 
+typedef enum 
+{
+    NO_RETRY_FUNC,
+    TV_RETRY_FUNC,
+    STEAM_RETRY_FUNC,
+    WII_RETRY_FUNC
+} retry_function_t;
+
 #define HTTP_SUCCESS(http_code) ((http_code) >= 200 && (http_code) <= 299)
 
 uint16_t cec_physical_address;
@@ -46,6 +55,11 @@ httpd_handle_t http_server_handle;
 WiFiUDP UDP;
 WakeOnLan WOL(UDP);
 bool device_state[CEC_MAX_ADDRESS + 1];
+xSemaphoreHandle retry_sem;
+std::atomic_bool steam_on_pending;
+std::atomic_bool tv_on_pending;
+std::atomic_bool wii_on_pending;
+std::atomic<retry_function_t> retry_function;
 
 void cec_loop(void* param);
 
@@ -81,32 +95,50 @@ void connect_wiFi()
     Serial.println(ip);
 }
 
-bool call_with_retry(std::function<bool()> f, int wait_ms)
+// bool call_with_retry(std::function<bool()> f, int wait_ms)
+// {
+//     int retry = 0;
+//     bool success;
+    
+//     if (xSemaphoreTake(retry_sem, 0) != pdTRUE)
+//     {
+//         ESP_LOGE(TAG, "Another retry process is already in progress");
+//         return false;
+//     }
+
+//     do
+//     {
+//         if (retry != 0)
+//         {
+//             ESP_LOGE(TAG, "control retry #%d", retry);
+//             delay(wait_ms);
+//         }
+//         success = f();
+//     } while (retry++ < MAX_COMMAND_RETRY && !success);
+
+//     xSemaphoreGive(retry_sem);
+
+//     return success;
+// }
+
+bool call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check, int check_wait_ms, int retry_wait_ms)
 {
     int retry = 0;
     bool success;
+
+    if (xSemaphoreTake(retry_sem, 0) != pdTRUE)
+    {
+        ESP_LOGE(TAG, "Retry already in progress.  Function %u cancelled.", func);
+        return false;
+    }
+
+    retry_function = func;
+
     do
     {
         if (retry != 0)
         {
-            printf("control retry #%d\n", retry);
-            delay(wait_ms);
-        }
-        success = f();
-    } while (retry++ < MAX_COMMAND_RETRY && !success);
-
-    return success;
-}
-
-bool call_with_retry(std::function<void()> f, std::function<bool()> check, int check_wait_ms, int retry_wait_ms)
-{
-    int retry = 0;
-    bool success;
-    do
-    {
-        if (retry != 0)
-        {
-            printf("control retry #%d in %dms\n", retry, retry_wait_ms);
+            ESP_LOGE(TAG, "Control retry #%d in %dms", retry, retry_wait_ms);
             delay(retry_wait_ms);
         }
         f();
@@ -115,7 +147,23 @@ bool call_with_retry(std::function<void()> f, std::function<bool()> check, int c
         device.ClearPending();
     } while (retry++ < MAX_COMMAND_RETRY && !success);
 
+    xSemaphoreGive(retry_sem);
+
+    retry_function = NO_RETRY_FUNC;
+
     return success;
+}
+
+bool check_retry_busy(retry_function_t func)
+{
+    if (xSemaphoreTake(retry_sem, 0) == pdTRUE)
+    {
+        xSemaphoreGive(retry_sem);
+
+        return false;        
+    }
+
+    return retry_function == func;
 }
 
 void complete_request(httpd_req_t* request, cJSON* response_doc)
@@ -254,17 +302,14 @@ bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, boo
 
     if (tv)
     {
-        printf("tv on?\n");
         check_device(CEC_TV_ADDRESS);
     }
     if (audio)
     {
-        printf("avr on?\n");
         check_device(CEC_AUDIO_SYSTEM_ADDRESS);
     }
     if (atv)
     {
-        printf("atv on?\n");
         check_device(CEC_PLAYBACK_DEVICE_1_ADDRESS);
     }
 
@@ -273,12 +318,26 @@ bool combine_devices_state(bool and_mode, bool tv = true, bool audio = true, boo
 
 esp_err_t handle_tv_get(httpd_req_t* request)
 {
-    auto state = combine_devices_state(false) ? "on" : "off";
+    auto pending = false;
+    bool tv_state;    
+
+    if (check_retry_busy(TV_RETRY_FUNC))
+    {
+        tv_state = tv_on_pending;
+        pending = true;
+    }
+    else
+    {
+        tv_state = combine_devices_state(false);
+    }
+
+    auto state_string = tv_state ? "on" : "off";
 
     cJSON* response_doc = cJSON_CreateObject();
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
-    cJSON_AddStringToObject(response_doc, "state", state);
+    cJSON_AddStringToObject(response_doc, "state", state_string);
+    cJSON_AddBoolToObject(response_doc, "pending", pending);
 
     complete_request(request, response_doc);
 
@@ -287,13 +346,26 @@ esp_err_t handle_tv_get(httpd_req_t* request)
 
 esp_err_t handle_wii_get(httpd_req_t* request)
 {
-    auto state = wii_query_power_state();
-    auto state_string = state == WII_POWER_STATE_ON ? "on" : state == WII_POWER_STATE_OFF ? "off" : "error";
+    auto pending = false;
+    wii_power_state_t wii_power_state;
+
+    if (check_retry_busy(WII_RETRY_FUNC))
+    {
+        wii_power_state = wii_on_pending ? WII_POWER_STATE_ON : WII_POWER_STATE_OFF;
+        pending = true;
+    }
+    else
+    {
+        wii_power_state = wii_query_power_state();
+    }
+
+    auto state_string = wii_power_state == WII_POWER_STATE_ON ? "on" : wii_power_state == WII_POWER_STATE_OFF ? "off" : "error";
 
     cJSON* response_doc = cJSON_CreateObject();
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
     cJSON_AddStringToObject(response_doc, "state", state_string);
+    cJSON_AddBoolToObject(response_doc, "pending", pending);
 
     complete_request(request, response_doc);
 
@@ -318,6 +390,41 @@ cJSON* parse_request(httpd_req_t* request)
     return cJSON_Parse(json);
 }
 
+void tv_state_task(void* param)
+{
+    bool desired_state = (bool)param;
+
+    ESP_LOGI(TAG, "set_tv_state = %u requested", desired_state);
+
+    void (*change_state)() = NULL;
+
+    if (desired_state)
+    {
+        change_state = [] {
+            uint16_t addr = TV_HDMI_INPUT << 12 | ATV_HDMI_INPUT << 8;
+            device.SetActiveSource(addr);
+            device.TvScreenOn();
+            device.SystemAudioModeRequest(addr);
+            device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
+        };
+    }
+    else
+    {
+        change_state = [] { device.StandBy(); };
+    }
+
+    if (call_with_retry(TV_RETRY_FUNC, change_state, [desired_state] { return combine_devices_state(desired_state) == desired_state; }, 2000, 5000))
+    {
+        ESP_LOGI(TAG, "set_tv_state = %u succeeded", desired_state);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "set_tv_state = %u failed", desired_state);
+    }
+
+    vTaskDelete(NULL);
+}
+
 esp_err_t handle_tv_post(httpd_req_t* request)
 {
     auto request_doc = parse_request(request);
@@ -331,48 +438,40 @@ esp_err_t handle_tv_post(httpd_req_t* request)
 
     cJSON* state = cJSON_GetObjectItem(request_doc, "state");
 
-    if (state != NULL)
+    if (state == NULL)
     {
-        auto state_value = cJSON_GetStringValue(state);
-        auto desired_state = false;
-        void (*change_state)() = NULL;
-
-        if (strcmp(state_value, "on") == 0)
-        {
-            printf("turn tv on\n");
-            desired_state = true;
-            change_state = [] {
-                uint16_t addr = TV_HDMI_INPUT << 12 | ATV_HDMI_INPUT << 8;
-                device.SetActiveSource(addr);
-                device.TvScreenOn();
-                device.SystemAudioModeRequest(addr);
-                device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
-            };
-        }
-        else if (strcmp(state_value, "off") == 0)
-        {
-            printf("turn tv off\n");
-            desired_state = false;
-            change_state = [] { device.StandBy(); };
-        }
-
-        if (change_state != NULL)
-        {
-            if (call_with_retry(change_state, [desired_state] { return combine_devices_state(desired_state) == desired_state; }, 10000, 5000))
-            {
-                printf("change_tv_state = %u succeeded\n", desired_state);
-            }
-            else
-            {
-                printf("change_tv_state = %u failed\n", desired_state);
-            }
-        }
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
     }
 
-    auto state_string = combine_devices_state(false) ? "on" : "off";
+    auto state_value = cJSON_GetStringValue(state);
+    auto desired_state = false;
+
+    if (strcmp(state_value, "on") == 0)
+    {
+        printf("turn tv on\n");
+        desired_state = true;
+    }
+    else if (strcmp(state_value, "off") == 0)
+    {
+        printf("turn tv off\n");
+        desired_state = false;
+    }
+    else
+    {
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
+    }
+
+    tv_on_pending = desired_state;
+
+    xTaskCreate(tv_state_task, "tv_state", 4000, (void*)desired_state, 1, NULL);
+
+    auto state_string = desired_state ? "on" : "off";
 
     cJSON_AddStringToObject(response_doc, "state", state_string);
     cJSON_AddStringToObject(response_doc, "status", "ok");
+    cJSON_AddBoolToObject(response_doc, "pending", true);
 
     complete_request(request, response_doc);
     cJSON_Delete(request_doc);
@@ -467,8 +566,22 @@ bool steam_is_open()
     return open;
 }
 
-bool steam_state(bool and_mode)
+bool steam_state(bool and_mode, bool* pending)
 {
+    if (pending != NULL)
+    {        
+        *pending = false;
+
+        if (check_retry_busy(STEAM_RETRY_FUNC))
+        {
+            ESP_LOGI(TAG, "Returning pending steam state %d", (bool)steam_on_pending);
+
+            *pending = true;
+
+            return steam_on_pending;
+        }
+    }
+
     auto state = combine_devices_state(and_mode, true, true, false);
 
     ESP_LOGI(TAG, "steam status start %d", state);
@@ -507,6 +620,10 @@ bool steam_state(bool and_mode)
     return state;
 }
 
+bool steam_state(bool and_mode)
+{
+    return steam_state(and_mode, NULL);
+}
 
 bool steam_power_on()
 {
@@ -594,16 +711,70 @@ void steam_power_off()
 
 esp_err_t handle_steam_get(httpd_req_t* request)
 {
-    auto state = steam_state(false) ? "on" : "off";
+    bool pending;
+    auto state = steam_state(false, &pending) ? "on" : "off";
 
     cJSON* response_doc = cJSON_CreateObject();
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
     cJSON_AddStringToObject(response_doc, "state", state);
+    cJSON_AddBoolToObject(response_doc, "pending", pending);
 
     complete_request(request, response_doc);
 
     return ESP_OK;
+}
+
+void steam_state_task(void* param)
+{
+    bool desired_state = (bool)param;
+
+    ESP_LOGI(TAG, "set_steam_state = %u requested", desired_state);
+
+    void (*change_state)() = NULL;
+
+    if (desired_state)
+    {
+        change_state = [] {
+            uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
+            ESP_LOGI(TAG, "powering on steam...");
+            if (!steam_is_on())
+            {
+                ESP_LOGI(TAG, "pc off, powering on...");
+                if (!steam_power_on())
+                {
+                    return;
+                }
+                delay(10000);
+            }
+            device.SetActiveSource(addr);
+            device.SystemAudioModeRequest(addr);               
+            delay(10000);
+            ESP_LOGI(TAG, "opening steam...");
+            steam_start();
+            device.TvScreenOn();
+        };
+    }
+    else
+    {
+        change_state = [] { 
+            printf("turn steam off\n");
+            device.StandBy(); 
+            steam_close();
+            steam_power_off();
+        };
+    }
+
+    if (call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 2000, 5000))
+    {
+        ESP_LOGI(TAG, "set_steam_state = %u succeeded\n", desired_state);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "set_steam_state = %u failed\n", desired_state);
+    }
+
+    vTaskDelete(NULL);
 }
 
 esp_err_t handle_steam_post(httpd_req_t* request)
@@ -619,68 +790,90 @@ esp_err_t handle_steam_post(httpd_req_t* request)
 
     cJSON* state = cJSON_GetObjectItem(request_doc, "state");
 
-    if (state != NULL)
+    if (state == NULL)
     {
-        auto state_value = cJSON_GetStringValue(state);
-        auto desired_state = false;
-        void (*change_state)() = NULL;
-
-        if (strcmp(state_value, "on") == 0)
-        {
-            desired_state = true;
-            change_state = [] {
-                uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
-                ESP_LOGI(TAG, "powering on steam...");
-                if (!steam_is_on())
-                {
-                    ESP_LOGI(TAG, "pc off, powering on...");
-                    if (!steam_power_on())
-                    {
-                        return;
-                    }
-                    delay(10000);
-                }
-                device.SetActiveSource(addr);
-                device.SystemAudioModeRequest(addr);               
-                delay(10000);
-                ESP_LOGI(TAG, "opening steam...");
-                steam_start();
-                device.TvScreenOn();
-            };
-        }
-        else if (strcmp(state_value, "off") == 0)
-        {
-            desired_state = false;
-            change_state = [] { 
-                printf("turn steam off\n");
-                device.StandBy(); 
-                steam_close();
-                steam_power_off();
-            };
-        }
-
-        if (change_state != NULL)
-        {
-            if (call_with_retry(change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 2000, 5000))
-            {
-                printf("change_tv_state = %u succeeded\n", desired_state);
-            }
-            else
-            {
-                printf("change_tv_state = %u failed\n", desired_state);
-            }
-        }
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
     }
 
-    auto state_string = steam_state(false) ? "on" : "off";
+    auto state_value = cJSON_GetStringValue(state);
+    auto desired_state = false;
+
+    if (strcmp(state_value, "on") == 0)
+    {
+
+        desired_state = true;
+    }
+    else if (strcmp(state_value, "off") == 0)
+    {
+        desired_state = false;
+    }
+    else
+    {
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
+    }
+
+    steam_on_pending = desired_state;
+
+    xTaskCreate(steam_state_task, "steam_state", 4000, (void*)desired_state, 1, NULL);
+
+    auto state_string = desired_state ? "on" : "off";
 
     cJSON_AddStringToObject(response_doc, "state", state_string);
     cJSON_AddStringToObject(response_doc, "status", "ok");
+    cJSON_AddBoolToObject(response_doc, "pending", true);
 
     complete_request(request, response_doc);
     cJSON_Delete(request_doc);
 
     return ESP_OK;
+}
+
+void wii_state_task(void* param)
+{
+    bool desired_state = (bool)param;
+
+    wii_power_status_t(*change_state)() = NULL;
+    bool desired_av_state = desired_state;
+    wii_power_state_t desired_wii_state = desired_av_state ? WII_POWER_STATE_ON : WII_POWER_STATE_OFF;
+
+        ESP_LOGI(TAG, "set_wii_state = %u requested", desired_state);
+
+    if (desired_state)
+    {
+        change_state = [] {
+            auto status = wii_power_on();
+            uint16_t addr = TV_HDMI_INPUT << 12 | WII_HDMI_INPUT << 8;
+            device.SetActiveSource(addr);
+            device.TvScreenOn();
+            device.SystemAudioModeRequest(addr);
+            return status;
+        };
+    }
+    else
+    {
+        change_state = [] {
+            auto status = wii_power_off();
+            device.StandBy();
+            return status;
+        };
+    }
+
+    if (call_with_retry(WII_RETRY_FUNC, change_state, [desired_av_state, desired_wii_state]
+        { 
+            return wii_query_power_state() == desired_wii_state &&
+                combine_devices_state(desired_av_state, true, true, false) == desired_av_state; 
+        }, 5000, 1000))
+    {
+        ESP_LOGI(TAG, "set_wii_state = %u succeeded", desired_state);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "set_wii_state = %u failed", desired_state);
+    }
+
+    vTaskDelete(NULL);
 }
 
 esp_err_t handle_wii_post(httpd_req_t* request)
@@ -696,65 +889,39 @@ esp_err_t handle_wii_post(httpd_req_t* request)
 
     cJSON* state = cJSON_GetObjectItem(request_doc, "state");
 
-    wii_power_status_t status = WII_POWER_STATUS_UNKNOWN;
-    wii_power_status_t(*change_state)() = NULL;
-    bool desired_av_state;
-    wii_power_state_t desired_wii_state;
-
-    if (state != NULL)
+    if (state == NULL)
     {
-        auto state_value = cJSON_GetStringValue(state);
-        if (strcmp(state_value, "on") == 0)
-        {
-            desired_wii_state = WII_POWER_STATE_ON;
-            desired_av_state = true;
-            change_state = [] {
-                auto status = wii_power_on();
-                uint16_t addr = TV_HDMI_INPUT << 12 | WII_HDMI_INPUT << 8;
-                device.SetActiveSource(addr);
-                device.TvScreenOn();
-                device.SystemAudioModeRequest(addr);
-                //delay(5000);
-                //device.SetSystemAudioMode(true);
-                return status;
-            };
-        }
-        else if (strcmp(state_value, "off") == 0)
-        {
-            desired_wii_state = WII_POWER_STATE_OFF;
-            desired_av_state = false;
-            change_state = [] {
-                auto status = wii_power_off();
-                device.StandBy();
-                return status;
-            };
-        }
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
     }
 
-    if (change_state != NULL)
+    bool desired_state = false;
+
+    auto state_value = cJSON_GetStringValue(state);
+    if (strcmp(state_value, "on") == 0)
     {
-        if (!call_with_retry(change_state, [desired_av_state, desired_wii_state]
-            { return wii_query_power_state() == desired_wii_state &&
-            combine_devices_state(desired_av_state, true, true, false) == desired_av_state; }, 5000, 1000))
-        {
-            printf("wii control failed\n");
-        }
+        desired_state = true;
     }
-
-    cJSON_AddBoolToObject(response_doc, "power_toggled", status == WII_POWER_STATUS_TOGGLED);
-    cJSON_AddStringToObject(response_doc, "status", "ok");
-
-    if (status == WII_POWER_STATUS_ERROR)
+    else if (strcmp(state_value, "off") == 0)
     {
-        cJSON_AddStringToObject(response_doc, "state", "error");
+        desired_state = false;
     }
     else
     {
-        wii_power_state_t state = wii_query_power_state();
-        auto state_string = state == WII_POWER_STATE_ON ? "on" : state == WII_POWER_STATE_OFF ? "off" : "error";
-        cJSON_AddStringToObject(response_doc, "state", state_string);
+        httpd_resp_send_500(request);
+        return ESP_FAIL;
     }
 
+    wii_on_pending = desired_state;
+
+    xTaskCreate(wii_state_task, "wii_state", 4000, (void*)desired_state, 1, NULL);
+
+    auto state_string = desired_state ? "on" : "off";
+
+    cJSON_AddStringToObject(response_doc, "state", state_string);
+    cJSON_AddStringToObject(response_doc, "status", "ok");
+    cJSON_AddBoolToObject(response_doc, "pending", true);
+    
     complete_request(request, response_doc);
     cJSON_Delete(request_doc);
 
@@ -1133,6 +1300,9 @@ void setup()
     device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
     xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
 #endif
+
+    retry_sem = xSemaphoreCreateBinary();
+    xSemaphoreGive(retry_sem);
 
     wii_init();
     connect_wiFi();
