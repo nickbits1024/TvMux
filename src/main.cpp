@@ -566,7 +566,7 @@ bool steam_is_open()
     return open;
 }
 
-bool steam_state(bool and_mode, bool* pending)
+bool steam_state(bool and_mode, bool ensure_open, bool* pending)
 {
     if (pending != NULL)
     {        
@@ -612,7 +612,7 @@ bool steam_state(bool and_mode, bool* pending)
     }
     ESP_LOGI(TAG, "steam status end %d", state);
 
-    if (state && !steam_is_open())
+    if (ensure_open && state && !steam_is_open())
     {
         state = false;
     }
@@ -620,9 +620,9 @@ bool steam_state(bool and_mode, bool* pending)
     return state;
 }
 
-bool steam_state(bool and_mode)
+bool steam_state(bool and_mode, bool ensure_open)
 {
-    return steam_state(and_mode, NULL);
+    return steam_state(and_mode, ensure_open, NULL);
 }
 
 bool steam_power_on()
@@ -712,7 +712,7 @@ void steam_power_off()
 esp_err_t handle_steam_get(httpd_req_t* request)
 {
     bool pending;
-    auto state = steam_state(false, &pending) ? "on" : "off";
+    auto state = steam_state(false, true, &pending) ? "on" : "off";
 
     cJSON* response_doc = cJSON_CreateObject();
 
@@ -737,22 +737,24 @@ void steam_state_task(void* param)
     {
         change_state = [] {
             uint16_t addr = TV_HDMI_INPUT << 12 | STEAM_HDMI_INPUT << 8;
-            ESP_LOGI(TAG, "powering on steam...");
+
+            device.SetActiveSource(addr);
+            device.SystemAudioModeRequest(addr);               
+            device.TvScreenOn();
+
+            ESP_LOGI(TAG, "checking steam pc...");
             if (!steam_is_on())
             {
-                ESP_LOGI(TAG, "pc off, powering on...");
+                ESP_LOGI(TAG, "powering on steam pc...");
                 if (!steam_power_on())
                 {
                     return;
                 }
-                delay(10000);
+                //delay(10000);
             }
-            device.SetActiveSource(addr);
-            device.SystemAudioModeRequest(addr);               
             delay(10000);
             ESP_LOGI(TAG, "opening steam...");
             steam_start();
-            device.TvScreenOn();
         };
     }
     else
@@ -765,7 +767,7 @@ void steam_state_task(void* param)
         };
     }
 
-    if (call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 2000, 5000))
+    if (call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return steam_state(desired_state, false) == desired_state; }, 2000, 5000))
     {
         ESP_LOGI(TAG, "set_steam_state = %u succeeded\n", desired_state);
     }
