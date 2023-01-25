@@ -635,7 +635,7 @@ bool steam_power_on()
         }
         printf("send WOL (%d)\n", i + 1);
         WOL.sendMagicPacket(STEAM_PC_MAC);
-        delay(2000);
+        delay(1000);
     }
     return false;
 }
