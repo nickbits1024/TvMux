@@ -566,7 +566,7 @@ bool steam_is_open()
     return open;
 }
 
-bool steam_state(bool and_mode, bool ensure_open, bool* pending)
+bool steam_state(bool and_mode, bool exclusive, bool* pending)
 {
     if (pending != NULL)
     {        
@@ -591,38 +591,41 @@ bool steam_state(bool and_mode, bool ensure_open, bool* pending)
         if (state)
         {
             state &= Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
-            ESP_LOGI(TAG, "steam status ping %d", state);            
+            ESP_LOGI(TAG, "steam status ping %d", state);
         }
         if (state)
         {
             state &= check_steam_topology();
             ESP_LOGI(TAG, "steam status topology %d", state);            
         }
+        if (state)
+        {
+            state &= steam_is_open();
+            ESP_LOGI(TAG, "steam status open %d", state);
+        }
     }
     else
     {
-        if (!state)
+        if (exclusive)
         {
-            state |= Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
+            state = Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT) && steam_is_open();
         }
-        // if (!state)
-        // {
-        //     state |= check_steam_topology();
-        // }
+        else
+        {
+            if (!state)
+            {
+                state |= Ping.ping(STEAM_PC_HOSTNAME, STEAM_PC_PING_COUNT);
+            }
+        }
     }
     ESP_LOGI(TAG, "steam status end %d", state);
 
-    if (ensure_open && state && !steam_is_open())
-    {
-        state = false;
-    }
-     
     return state;
 }
 
-bool steam_state(bool and_mode, bool ensure_open)
+bool steam_state(bool and_mode)
 {
-    return steam_state(and_mode, ensure_open, NULL);
+    return steam_state(and_mode, false, NULL);
 }
 
 bool steam_power_on()
@@ -767,7 +770,7 @@ void steam_state_task(void* param)
         };
     }
 
-    if (call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return steam_state(desired_state, false) == desired_state; }, 2000, 5000))
+    if (call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return steam_state(desired_state) == desired_state; }, 2000, 5000))
     {
         ESP_LOGI(TAG, "set_steam_state = %u succeeded\n", desired_state);
     }
