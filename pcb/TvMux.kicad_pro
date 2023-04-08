@@ -33,9 +33,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.762,
-          "height": 1.524,
-          "width": 1.524
+          "drill": 2.9095,
+          "height": 4.275,
+          "width": 4.275
         },
         "silk_line_width": 0.15,
         "silk_text_italic": false,
@@ -55,7 +55,11 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        "silk_over_copper|136500000|61000000|47fbbf2a-fb41-4d80-bea9-d331c2a2be6b|8ad0b284-21d0-40a3-8113-e81e51d6cc12",
+        "silk_over_copper|154500000|61000000|47fbbf2a-fb41-4d80-bea9-d331c2a2be6b|67516b05-9cf1-43c4-aa3c-7da32499b48f",
+        "silk_over_copper|154500000|61040000|47fbbf2a-fb41-4d80-bea9-d331c2a2be6b|cdb09a83-62f8-4cdf-b5bc-014cf89ce1e7"
+      ],
       "meta": {
         "version": 2
       },
@@ -120,6 +124,7 @@
       },
       "track_widths": [
         0.0,
+        0.175006,
         0.2,
         0.25,
         0.3,
@@ -144,9 +149,7 @@
     "equivalence_files": []
   },
   "erc": {
-    "erc_exclusions": [
-      "power_pin_not_driven|2654300|292100|10e8243c-d829-4083-b317-c9686ea07929|00000000-0000-0000-0000-000000000000"
-    ],
+    "erc_exclusions": [],
     "meta": {
       "version": 0
     },
@@ -449,6 +452,7 @@
         "microvia_drill": 0.2,
         "name": "VBUS",
         "nets": [
+          "USB_VBUS",
           "VBUS"
         ],
         "pcb_color": "rgba(0, 0, 0, 0.000)",
