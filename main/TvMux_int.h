@@ -1,0 +1,20 @@
+#define HDMI_CEC
+
+#define TVMUX_HOTPLUG_GPIO_NUM          (GPIO_NUM_19)
+#define TVMUX_HOTPLUG_GPIO_SEL          (1ull << TVMUX_HOTPLUG_GPIO_NUM)
+
+#define TVMUX_STEAM_HOSTNAME            "seattle.home.nickpalmer.net"
+#define TVMUX_STEAM_PORT                (1410)
+#define TVMUX_STEAM_MAC                 "58:11:22:B4:B6:D9"
+#define TVMUX_STEAM_PING_COUNT          (2)
+#define TVMUX_STEAM_PING_INTERVAL       (500)
+
+#define HTTP_SUCCESS(http_code) ((http_code) >= 200 && (http_code) <= 299)
+
+uint8_t readI2CByte(uint8_t data_addr);
+bool parse_edid(unsigned char* edid);
+bool parse_edid_extension(uint8_t* edid2, uint8_t* ext);
+
+bool tvmux_steam_is_on();
+bool tvmux_steam_is_open();
+void tvmux_steam_state_task(void* param);

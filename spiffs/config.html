@@ -1,0 +1,87 @@
+<html>
+
+<head>
+    <title>Bed Configuration</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.3.14/angular.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        td {
+
+            padding: 5px;
+        }
+
+        .hold {
+            background-color: #eee;
+        }
+
+        table.ports { 
+            border-top: 1px solid black;
+            border-left: 1px solid black;
+            border-spacing: 0px;
+        }
+
+        table.ports tr td {
+            border-right: 1px solid black;
+            border-bottom: 1px solid black;
+        }
+    </style>
+</head>
+
+<body data-ng-app="bed" data-ng-controller="ConfigController">
+
+    <h1>Bed Configuration</h1>
+
+    <h2>Home Assistant</h2>
+
+    <table>
+        <tr>
+            <td>URL</td>
+            <td><input data-ng-model="config.ha_url" type="text" size="100" /></td>
+        </tr>
+        <tr>
+            <td>Authorization Key</td>
+            <td><input data-ng-model="config.ha_auth" type="text" size="100" /></td>
+        </tr>
+        <tr>
+            <td>Entity</td>
+            <td>sensor.<input data-ng-model="config.ha_entity" type="text" size="100" style="width: 685px" /></td>
+        </tr>
+    </table>
+
+    <button data-ng-click="save()">Save</button>
+
+    <script>
+        angular.module("bed", [])
+            .controller("ConfigController", function ($scope, $http) {
+
+                $http.get("api/config")
+                    .then(function (response) {
+                        console.log(response.data);
+
+                        if (response.status == 200) {
+                            $scope.config = response.data;
+                        }
+                    }).finally(function () {
+                        $scope.config = $scope.config || {};
+
+                        console.log($scope.config);
+                    });
+
+                $scope.save = function () {
+                    console.log($scope.config);
+                    $http.post("api/config", $scope.config)
+                        .then(function (response) {
+                            console.log(response.data);
+                            $scope.config = response.data;
+                        });
+                };
+
+            });
+
+    </script>
+</body>
+
+</html>

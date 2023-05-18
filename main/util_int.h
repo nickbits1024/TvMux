@@ -1,0 +1,1 @@
+#define PING_DNS_TIMEOUT    1000
