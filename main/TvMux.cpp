@@ -29,7 +29,7 @@ std::atomic_bool tv_on_pending;
 std::atomic_bool wii_on_pending;
 std::atomic<retry_function_t> retry_function;
 
-esp_err_t tvmux_init()
+esp_err_t tvmux_init(bool* setup_enabled)
 {
     gpio_config_t io_conf;
 
@@ -41,12 +41,21 @@ esp_err_t tvmux_init()
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
+    io_conf.pin_bit_mask = TVMUX_SETUP_GPIO_SEL;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+
     esp_err_t err = nvs_open("default", NVS_READWRITE, &config_nvs_handle);
     ESP_ERROR_CHECK(err);
 
 #ifdef HDMI_CEC
     ESP_LOGI(TAG, "Waiting for hotplug signal...");
-    while (gpio_get_level(TVMUX_HOTPLUG_GPIO_NUM) == 0)
+    while (gpio_get_level(TVMUX_HOTPLUG_GPIO_NUM) == 1)
     { 
         vTaskDelay(50 / portTICK_PERIOD_MS);
     }
@@ -85,6 +94,8 @@ esp_err_t tvmux_init()
     cec_init();
     
 #endif
+
+    *setup_enabled = gpio_get_level(TVMUX_SETUP_GPIO_NUM) == TVMUX_SETUP_ENABLED;
 
     retry_sem = xSemaphoreCreateBinary();
     xSemaphoreGive(retry_sem);    
@@ -145,18 +156,42 @@ bool tvmux_steam_state(bool and_mode)
 
 bool tvmux_steam_power_on()
 {
-    for (int i = 0; i < 10; i++)
-    {
-        if (tvmux_steam_is_on())
-        {
-            return true;
-        }
-        printf("send WOL (%d)\n", i + 1);
-        //WOL.sendMagicPacket(TVMUX_STEAM_PC_MAC);
-        // FIXME
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
+    // for (int i = 0; i < 10; i++)
+    // {
+    //     if (tvmux_steam_is_on())
+    //     {
+    //         return true;
+    //     }
+    //     printf("send WOL (%d)\n", i + 1);
+    //     //WOL.sendMagicPacket(TVMUX_STEAM_PC_MAC);
+    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // }
+
+    send_WOL(TVMUX_STEAM_MAC, 10, 1000);
+
     return false;
+}
+
+
+cJSON* tvmux_steam_get_json(const char* path)
+{
+    char url[100];
+    snprintf(url, sizeof(url), "http://%s:%d%s", TVMUX_STEAM_HOSTNAME, TVMUX_STEAM_PORT, path);
+
+    return get_json(url);
+}
+
+bool tvmux_steam_get(const char* path)
+{
+    cJSON* json = tvmux_steam_get_json(path);
+    if (json == NULL)
+    {
+        return false;
+    }
+
+    cJSON_Delete(json);
+
+    return true;
 }
 
 void tvmux_steam_start()
@@ -181,7 +216,14 @@ void tvmux_steam_start()
     // }
     // http.end();
 
-    // FIXME
+    if (tvmux_steam_get("/api/steam/bigpicture/start"))
+    {
+        ESP_LOGE(TAG, "tvmux_steam_start succeeded");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "tvmux_steam_start failed");
+    }
 }
 
 void tvmux_steam_close()
@@ -205,7 +247,15 @@ void tvmux_steam_close()
     //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
     // }
     // http.end();
-    // FIXME
+    
+    if (tvmux_steam_get("/api/steam/close"))
+    {
+        ESP_LOGE(TAG, "tvmux_steam_close succeeded");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "tvmux_steam_close failed");
+    }       
 }
 
 void steam_power_off()
@@ -229,12 +279,19 @@ void steam_power_off()
     //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
     // }
     // http.end();
-    // FIXME
+    if (tvmux_steam_get("/api/computer/off"))
+    {
+        ESP_LOGE(TAG, "steam_power_off succeeded");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "steam_power_off failed");
+    }   
 }
 
 bool check_steam_topology()
 {
-    // bool external = false;
+    bool external = false;
 
     // HTTPClient http;
 
@@ -272,8 +329,27 @@ bool check_steam_topology()
 
     // return external;
 
-// FIXME
-    return false;
+    cJSON* json = tvmux_steam_get_json("/api/monitor/topology");
+    if (json != NULL)
+    {
+        auto topology_prop = cJSON_GetObjectItem(json, "topology");
+        if (topology_prop != NULL)
+        {
+            auto topology_value = cJSON_GetStringValue(topology_prop);
+            if (topology_value != NULL)
+            {
+                external = strcasecmp(topology_value, "External") == 0;
+                ESP_LOGI(TAG, "topology: %s", topology_value);
+            }
+        }
+        cJSON_Delete(json);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "check_steam_topology failed");
+    }
+
+    return external;
 }
 
 bool tvmux_steam_is_on()
@@ -284,7 +360,7 @@ bool tvmux_steam_is_on()
 
 bool tvmux_steam_is_open()
 {
-    // bool open = false;
+    bool open = false;
 
     // HTTPClient http;
 
@@ -322,8 +398,26 @@ bool tvmux_steam_is_open()
 
     // return open;
 
-// FIXME
-    return false;
+    cJSON* json = tvmux_steam_get_json("/api/steam/status");
+    if (json != NULL)
+    {
+        auto status_prop = cJSON_GetObjectItem(json, "steamStatus");
+        if (status_prop != NULL)
+        {
+            auto status_value = cJSON_GetStringValue(status_prop);
+            if (status_value != NULL)
+            {
+                open = strcasecmp(status_value, "Open") == 0;
+                ESP_LOGI(TAG, "open: %s", status_value);
+            }
+        }
+        cJSON_Delete(json);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "check_steam_topology failed");
+    }
+    return open;
 }
 
 esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pending)
@@ -352,7 +446,6 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
         {
             int pongs;
             *state &= ping(TVMUX_STEAM_HOSTNAME, TVMUX_STEAM_PING_COUNT, TVMUX_STEAM_PING_INTERVAL, &pongs) == ESP_OK && pongs > 0;
-            // FIXME
             ESP_LOGI(TAG, "steam status ping %d", *state);
         }
         if (state)

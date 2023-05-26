@@ -1,7 +1,10 @@
-#define HDMI_CEC
-
-#define TVMUX_HOTPLUG_GPIO_NUM          (GPIO_NUM_19)
+#define TVMUX_HOTPLUG_GPIO_NUM          (GPIO_NUM_18)
 #define TVMUX_HOTPLUG_GPIO_SEL          (1ull << TVMUX_HOTPLUG_GPIO_NUM)
+
+#define TVMUX_SETUP_GPIO_NUM            (GPIO_NUM_19)
+#define TVMUX_SETUP_GPIO_SEL            (1ull << TVMUX_HOTPLUG_GPIO_NUM)
+
+#define TVMUX_SETUP_ENABLED             (1)
 
 #define TVMUX_STEAM_HOSTNAME            "seattle.home.nickpalmer.net"
 #define TVMUX_STEAM_PORT                (1410)

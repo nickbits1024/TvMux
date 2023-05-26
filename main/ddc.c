@@ -20,8 +20,6 @@ esp_err_t ddc_init()
     conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
     conf.scl_io_num = DDC_SCL_GPIO_NUM;
     conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    //conf.slave.addr_10bit_en = 0;
-    //conf.slave.slave_addr = DDC_I2C_ADDRESS;
     conf.master.clk_speed = DDC_MASTER_FREQ_HZ;
 
     ESP_RETURN_ON_ERROR(i2c_param_config(DDC_I2C_PORT, &conf), TAG, "DDC config failed (%s)", esp_err_to_name(err_rc_));
@@ -45,7 +43,7 @@ esp_err_t ddc_reset()
     return ddc_init();
 }
 
-esp_err_t i2c_read_byte(uint8_t address, uint8_t offset, uint8_t* value)
+esp_err_t ddc_read_byte(uint8_t address, uint8_t offset, uint8_t* value)
 {
     //esp_err_t ret = ESP_OK;
 
@@ -54,6 +52,10 @@ esp_err_t i2c_read_byte(uint8_t address, uint8_t offset, uint8_t* value)
         return ESP_ERR_INVALID_ARG;
     }
     *value = 0;
+
+#ifndef HDMI_CEC
+    return ESP_OK;
+#endif
 
     //uint8_t cmd_buffer[2];
 

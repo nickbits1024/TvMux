@@ -25,6 +25,13 @@
         "string": "cpp",
         "random": "cpp",
         "util.h": "c",
-        "inet.h": "c"
-    }
+        "inet.h": "c",
+        "array": "c",
+        "string_view": "c",
+        "initializer_list": "c",
+        "regex": "c",
+        "utility": "c",
+        "sockets.h": "c"
+    },
+    "idf.flashType": "UART"
 }

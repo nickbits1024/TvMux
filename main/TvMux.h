@@ -27,7 +27,7 @@ typedef enum
     WII_RETRY_FUNC
 } retry_function_t;
 
-esp_err_t tvmux_init();
+esp_err_t tvmux_init(bool* setup_enabled);
 esp_err_t tvmux_steam_power(bool power_on);
 esp_err_t tvmux_wii_power(bool power_on);
 esp_err_t tvmux_cec_log_write(httpd_req_t* request);
@@ -44,5 +44,7 @@ bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::
 
 }
 #endif
+
+#define HDMI_CEC
 
 #endif

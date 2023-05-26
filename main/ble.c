@@ -10,6 +10,7 @@
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 #include "wifi.h"
+#include "ble_int.h"
 #include "ble.h"
 
 #define TAG "BLE"
@@ -59,8 +60,8 @@ static const uint8_t wifi_password_guid[] = { 0x01, 0x2A, 0xDB, 0x5E, 0x98, 0x26
 static const uint8_t wifi_ssid_guid[] = { 0x29, 0x16, 0xD4, 0x9D, 0x7D, 0xAC, 0x4B, 0x26, 0xB8, 0xB7, 0x88, 0x8E, 0xC7, 0x60, 0x62, 0x14 }; 
 
 static esp_ble_adv_params_t adv_params = {
-    .adv_int_min = 0x20,
-    .adv_int_max = 0x40,
+    .adv_int_min = BLE_AD_INTERVAL,
+    .adv_int_max = BLE_AD_INTERVAL,
     .adv_type = ADV_TYPE_IND,
     .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
     .channel_map = ADV_CHNL_ALL,

@@ -164,12 +164,12 @@ esp_err_t wifi_connect()
     if (bits & WIFI_CONNECTED_BIT)
     {
         ESP_LOGI(TAG, "connected to SSID: %s password: ********", wifi_ssid);
+        ESP_ERROR_CHECK(health_start());
     }
     else if (bits & WIFI_FAIL_BIT)
     {
         ESP_LOGE(TAG, "failed to connect to SSID: %s, password: ********", wifi_ssid);
     }
-    ESP_ERROR_CHECK(health_start());
 cleanup:
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
