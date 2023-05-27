@@ -12,6 +12,7 @@
 #include "cec.h"
 #include "wii.h"
 #include "util.h"
+#include "led.h"
 #include "TvMux.h"
 #include "TvMux_int.h"
 
@@ -44,24 +45,23 @@ esp_err_t tvmux_init(bool* setup_enabled)
     io_conf.pin_bit_mask = TVMUX_SETUP_GPIO_SEL;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
     io_conf.intr_type = GPIO_INTR_DISABLE;
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-
 
     esp_err_t err = nvs_open("default", NVS_READWRITE, &config_nvs_handle);
     ESP_ERROR_CHECK(err);
 
 #ifdef HDMI_CEC
     ESP_LOGI(TAG, "Waiting for hotplug signal...");
-    while (gpio_get_level(TVMUX_HOTPLUG_GPIO_NUM) == 1)
-    { 
-        vTaskDelay(50 / portTICK_PERIOD_MS);
-    }
+    // FIXME
+    // while (gpio_get_level(TVMUX_HOTPLUG_GPIO_NUM) == 1)
+    // { 
+    //     vTaskDelay(50 / portTICK_PERIOD_MS);
+    // }
 
     ESP_LOGI(TAG, "Hotplug signal detected!\n");
-    //last_hpd_time = uptimed();
 
     uint8_t edid[DDC_EDID_LENGTH];
     uint8_t edid_extension[DDC_EDID_EXTENSION_LENGTH];
@@ -71,10 +71,11 @@ esp_err_t tvmux_init(bool* setup_enabled)
         for (int i = 0; i < DDC_EDID_LENGTH; i++)
         {
             ESP_ERROR_CHECK(ddc_read_byte(DDC_EDID_ADDRESS, i, &edid[i]));
+            //printf("%02x ", edid[i]);
         }
-
-        ESP_LOGI(TAG, "Received EDID");
-
+        // printf("\n");
+        // ESP_LOGI(TAG, "Received EDID");        
+        // vTaskDelay(5000 / portTICK_PERIOD_MS);
     } while (!parse_edid(edid));
 
     if (edid[DDC_EDID_EXTENSION_FLAG])
@@ -93,6 +94,8 @@ esp_err_t tvmux_init(bool* setup_enabled)
 
     cec_init();
     
+    // FIXME
+    //xTaskCreate(tvmux_hdmi_task, "hdmi", 2000, NULL, 1, NULL);
 #endif
 
     *setup_enabled = gpio_get_level(TVMUX_SETUP_GPIO_NUM) == TVMUX_SETUP_ENABLED;
@@ -114,6 +117,8 @@ bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::
         return false;
     }
 
+    led_push_rgb_color(255, 255, 0);
+
     retry_function = func;
 
     do
@@ -130,6 +135,8 @@ bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::
     } while (retry++ < TVMUX_MAX_COMMAND_RETRY && !success);
 
     xSemaphoreGive(retry_sem);
+
+    led_pop_rgb_color();
 
     retry_function = NO_RETRY_FUNC;
 
@@ -529,8 +536,8 @@ bool parse_edid(unsigned char* edid)
         sum += (uint32_t)edid[i];
     }
 
-    ESP_LOGI(TAG, "EDID checksum: %08lx\n", sum);
-    ESP_LOGI(TAG, "EDID header: %08lx%08lx\n", header0, header1);
+    //ESP_LOGI(TAG, "EDID checksum: %08lx\n", sum);
+    //ESP_LOGI(TAG, "EDID header: %08lx%08lx\n", header0, header1);
 
     if (header0 != 0x00ffffff || header1 != 0xffffff00)
     {
@@ -554,8 +561,8 @@ bool parse_edid(unsigned char* edid)
     uint8_t revision = edid[0x13];
     //uint8_t extension_flag = edid[EDID_EXTENSION_FLAG];
 
-    ESP_LOGI(TAG, "EDID version: %u.%u\n", version, revision);
-    ESP_LOGI(TAG, "EDID manufacturer: %s\n", manufacturer);
+    ESP_LOGI(TAG, "EDID version: %u.%u", version, revision);
+    ESP_LOGI(TAG, "EDID manufacturer: %s", manufacturer);
     //ESP_LOGI(TAG, "EDID extension_flag: %d\n", extension_flag);
 
     return true;
@@ -756,4 +763,18 @@ esp_err_t tvmux_tv_power(bool power_on)
     tv_on_pending = power_on;
 
     return cec_tv_power(power_on);
+}
+
+void tvmux_hdmi_task(void* param)
+{
+    for (;;) 
+    {
+        if (gpio_get_level(TVMUX_HOTPLUG_GPIO_NUM) == 1)
+        { 
+            ESP_LOGE(TAG, "HDMI disconnected, rebooting...");
+            esp_restart();
+        }
+
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
 }

@@ -3,8 +3,8 @@
 #define WIFI_SSID_NVS_KEY       "ssid"
 #define WIFI_PASSWORD_NVS_KEY   "pw"
 
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT BIT1
+#define WIFI_CONNECTED_BIT      BIT0
+#define WIFI_FAIL_BIT           BIT1
 
 static esp_err_t wifi_connect();
 static esp_err_t wifi_reset();

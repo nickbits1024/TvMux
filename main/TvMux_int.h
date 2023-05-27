@@ -2,7 +2,7 @@
 #define TVMUX_HOTPLUG_GPIO_SEL          (1ull << TVMUX_HOTPLUG_GPIO_NUM)
 
 #define TVMUX_SETUP_GPIO_NUM            (GPIO_NUM_19)
-#define TVMUX_SETUP_GPIO_SEL            (1ull << TVMUX_HOTPLUG_GPIO_NUM)
+#define TVMUX_SETUP_GPIO_SEL            (1ull << TVMUX_SETUP_GPIO_NUM)
 
 #define TVMUX_SETUP_ENABLED             (1)
 
@@ -21,3 +21,5 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext);
 bool tvmux_steam_is_on();
 bool tvmux_steam_is_open();
 void tvmux_steam_state_task(void* param);
+
+void tvmux_hdmi_task(void* param);

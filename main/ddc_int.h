@@ -7,4 +7,4 @@
 #define DDC_I2C_PORT        I2C_NUM_0
 #define DDC_I2C_ADDRESS     0x37
 
-#define DDC_I2C_TIMEOUT     (1000 / portTICK_PERIOD_MS)
+#define DDC_I2C_TIMEOUT     (5000 / portTICK_PERIOD_MS)

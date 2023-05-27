@@ -9,6 +9,7 @@
 #include "rom/ets_sys.h"
 #include "ddc_int.h"
 #include "ddc.h"
+#include "TvMux.h"
 
 #define TAG "DDC"
 

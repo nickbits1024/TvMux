@@ -1,7 +1,8 @@
 #include <freertos/FreeRTOS.h>
 #include "wii.h"
+#include "wii_int.h"
 
-WII_REQUEST_RESPONSE wii_sdp_request_responses[] =
+wii_request_response_t wii_sdp_request_responses[] =
 {
     { "\x02\x00\x00\x00\x08\x35\x03\x19\x11\x24\x00\x15\x00", 13, "\x03\x00\x00\x00\x09\x00\x01\x00\x01\x00\x01\x00\x00\x00", 14 },
     { "\x04\x00\x01\x00\x0e\x00\x01\x00\x00\x00\xf0\x35\x05\x0a\x00\x00\xff\xff\x00", 19, "\x05\x00\x01\x00\x7b\x00\x76\x36\x01\xcc\x09\x00\x00\x0a\x00\x01\x00\x00\x09\x00\x01\x35\x03", 23 },
@@ -26,9 +27,9 @@ WII_REQUEST_RESPONSE wii_sdp_request_responses[] =
     { NULL, 0, "\x0c\x80\x09\x02\x0d\x28\x00\x09\x02\x0e\x28\x00\x00", 13 }
 };
 
-int wii_sdp_request_responses_size = sizeof(wii_sdp_request_responses) / sizeof(WII_REQUEST_RESPONSE);
+int wii_sdp_request_responses_size = sizeof(wii_sdp_request_responses) / sizeof(wii_request_response_t);
 
-WII_REQUEST_RESPONSE wii_hid_request_responses[] =
+wii_request_response_t wii_hid_request_responses[] =
 {
     { "\xa2\x17\x00\x00\x17\x70\x00\x01", 8, "\xa1\x21\x00\x00\xf8\x17\x70\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 23 },
     { "\xa2\x12\x06\x30", 4, "\xa1\x22\x00\x00\x12\x00", 6 },
@@ -80,4 +81,4 @@ WII_REQUEST_RESPONSE wii_hid_request_responses[] =
     { NULL, 0, NULL, 0 }
 };
 
-int wii_hid_request_responses_size = sizeof(wii_hid_request_responses) / sizeof(WII_REQUEST_RESPONSE);
+int wii_hid_request_responses_size = sizeof(wii_hid_request_responses) / sizeof(wii_request_response_t);

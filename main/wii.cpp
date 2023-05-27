@@ -3,6 +3,7 @@
 #include <nvs_flash.h>
 #include <esp_bt_main.h>
 #include <esp_bt.h>
+#include <esp_check.h>
 #include <esp_mac.h>
 #include "driver/gpio.h"
 #include "bthci.h"
@@ -10,21 +11,12 @@
 #include "tvmux.h"
 #include "led.h"
 #include "wii.h"
+#include "wii_int.h"
 
-typedef enum
-{
-    WII_IDLE,
-    WII_ABORT,
-    WII_ERROR,
-    WII_PAIRING_PENDING,
-    WII_PAIRING,
-    WII_POWER_ON,
-    WII_POWER_OFF,
-    WII_QUERY_POWER_STATE
-} wii_state_t;
+#define TAG "wii"
 
-volatile wii_state_t wii_state;
-bool wii_pair_request;
+ wii_state_t wii_state;
+//bool wii_pair_request;
 
 SemaphoreHandle_t wii_response_sem;
 bd_addr_t device_addr;
@@ -32,24 +24,15 @@ bd_addr_t wii_addr;
 SemaphoreHandle_t output_queue_ready_sem;
 QueueHandle_t queue_handle;
 SemaphoreHandle_t all_controller_buffers_sem;
-TaskHandle_t pairing_task_handle;
+//TaskHandle_t pairing_task_handle;
 int all_controller_buffers_sem_count;
+static portMUX_TYPE wii_mux = portMUX_INITIALIZER_UNLOCKED;
 bool wii_on;
 uint16_t wii_con_handle;
 uint16_t wii_sdp_cid;
 uint16_t wii_control_cid;
 uint16_t wii_data_cid;
 uint8_t wii_disconnect_reason;
-
-void wii_packet_handler(uint8_t* packet, uint16_t size);
-void post_bt_packet(BT_PACKET_ENVELOPE* env);
-void wii_connect();
-void open_control_channel(uint16_t con_handle);
-void post_l2ap_config_mtu_request(uint16_t con_handle, uint16_t remote_cid, uint16_t mtu);
-void post_hid_report_packet(uint16_t con_handle, const uint8_t* report, uint16_t report_size);
-void post_sdp_packet(uint16_t con_handle, uint16_t l2cap_size, uint8_t* data, uint16_t data_size);
-void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_size);
-void wii_pair_irq_handler(void* arg);
 
 void queue_io_task(void* p)
 {
@@ -86,7 +69,7 @@ void queue_io_task(void* p)
 
                 if (hci_packet->type == HCI_ACL_PACKET_TYPE)
                 {
-                    //printf("acl sent...\n");
+                    //ESP_LOGI(TAG, "acl sent...");
 
                     HCI_ACL_PACKET* acl_packet = (HCI_ACL_PACKET*)hci_packet;
                     uint16_t con_handles[1] = { acl_packet->con_handle };
@@ -96,7 +79,7 @@ void queue_io_task(void* p)
                     while (!esp_vhci_host_check_send_available());
                     esp_vhci_host_send_packet(hncp_env->packet, hncp_env->size);
 
-                    //printf("acl sent\n");
+                    //ESP_LOGI(TAG, "acl sent");
 
                     free(hncp_env);
                     hncp_env = NULL;
@@ -115,33 +98,62 @@ void queue_io_task(void* p)
 
 void pairing_task(void* p)
 {
-    post_bt_packet(create_hci_write_scan_enable_packet(HCI_PAGE_SCAN_ENABLE | HCI_INQUIRY_SCAN_ENABLE));
-
-    for (int i = 0; i < 30 || wii_state == WII_PAIRING; i++)
+    for (;;)
     {
-        // not really thread safe but close enough
-        if (wii_state != WII_PAIRING_PENDING && wii_state != WII_PAIRING)
+        while (gpio_get_level(WII_PAIR_GPIO_NUM) == 1) 
         {
-            printf("wii_state changed to %u\n", wii_state);
-            break;
+            vTaskDelay(500 / portTICK_PERIOD_MS);
         }
-        led_set_rgb_color(0, 0, 255);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-        if (wii_state == WII_PAIRING_PENDING)
+
+        ESP_LOGI(TAG, "pairing started");
+
+        wii_state_set(WII_PAIRING_PENDING);
+
+        led_push_rgb_color(255, 255, 0);
+
+        while (gpio_get_level(WII_PAIR_GPIO_NUM) == 0) {
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+        }
+
+        //ESP_LOGI(TAG, "pairing button released");
+
+        post_bt_packet(create_hci_write_scan_enable_packet(HCI_PAGE_SCAN_ENABLE | HCI_INQUIRY_SCAN_ENABLE));
+
+        for (int i = 0; i < 30 || wii_state_get() == WII_PAIRING; i++)
         {
-            led_set_rgb_color(0, 255, 0);
-        }        
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-    }
-    if (wii_state == WII_PAIRING_PENDING)
-    {
-        printf("pairing incomplete\n");
-        wii_state = WII_IDLE;
-    }
+            if (wii_state_get() != WII_PAIRING_PENDING && wii_state_get() != WII_PAIRING)
+            {
+                ESP_LOGE(TAG, "wii_state changed to %u", wii_state_get());
+                break;
+            }
+            // if (wii_state_get() == WII_PAIRING)
+            // {
+            //     led_set_rgb_color(0, 0, 255);
+            // }
+            //led_set_rgb_color(0, 0, 255);
+            // vTaskDelay(500 / portTICK_PERIOD_MS);
+            // if (wii_state == WII_PAIRING_PENDING)
+            // {
+            //     led_set_rgb_color(0, 255, 0);
+            // }        
+            //vTaskDelay(500 / portTICK_PERIOD_MS);
 
-    post_bt_packet(create_hci_write_scan_enable_packet(0));
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+        if (wii_state_get() == WII_PAIRING_PENDING)
+        {
+            ESP_LOGE(TAG, "pairing incomplete");
+            wii_state_set(WII_IDLE);
 
-    pairing_task_handle = NULL;
+            led_set_rgb_color(255, 0, 0);
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+
+        post_bt_packet(create_hci_write_scan_enable_packet(0));
+
+        led_pop_rgb_color();
+    }
+    //pairing_task_handle = NULL;
     vTaskDelete(NULL);
 }
 
@@ -164,7 +176,7 @@ void handle_read_buffer_size_complete(HCI_READ_BUFFER_SIZE_COMPLETE_PACKET* pack
 
 void handle_role_change(HCI_ROLE_CHANGE_EVENT_PACKET* packet)
 {
-    switch (wii_state)
+    switch (wii_state_get())
     {
         case WII_QUERY_POWER_STATE:
             wii_on = packet->new_role == HCI_ROLE_SLAVE;
@@ -180,14 +192,14 @@ void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
     {
         case ERROR_CODE_SUCCESS:
             wii_con_handle = packet->con_handle;
-            switch (wii_state)
+            switch (wii_state_get())
             {
                 case WII_QUERY_POWER_STATE:
                 case WII_POWER_ON:
                 case WII_POWER_OFF:
                     if (wii_on) // sometimes the wii sends a role change if on, sometimes not
                     {
-                        printf("wii is on (via role change)\n");
+                        ESP_LOGI(TAG, "wii is on (via role change)");
                         post_bt_packet(create_hci_disconnect_packet(packet->con_handle, wii_disconnect_reason));
                     }
                     else
@@ -207,12 +219,12 @@ void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
             break;
         case ERROR_CODE_ACL_CONNECTION_ALREADY_EXISTS:
             vTaskDelay(500 / portTICK_PERIOD_MS);
-            printf("retrying connection...\n");
+            ESP_LOGI(TAG, "retrying connection...");
             wii_connect();
             break;
         default:
-            wii_state = WII_ERROR;
-            led_set_rgb_color(255, 0, 0);
+            wii_state_set(WII_ERROR);
+            //led_set_rgb_color(255, 0, 0);
             xSemaphoreGive(wii_response_sem);
             break;
     }
@@ -221,28 +233,28 @@ void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
 void handle_connection_request(HCI_CONNECTION_REQUEST_EVENT_PACKET* packet)
 {
     uint32_t cod = uint24_bytes_to_uint32(packet->class_of_device);
-    printf("connection request from %s cod %06lx type %u\n", bda_to_string(packet->addr), cod, packet->link_type);
+    ESP_LOGI(TAG, "connection request from %s cod %06lx type %u", bda_to_string(packet->addr), cod, packet->link_type);
 
-    if (wii_state == WII_PAIRING_PENDING && packet->link_type == HCI_LINK_TYPE_ACL && cod == WII_COD)
+    if (wii_state_get() == WII_PAIRING_PENDING && packet->link_type == HCI_LINK_TYPE_ACL && cod == WII_COD)
     {
-        wii_state = WII_PAIRING;
-        printf("accepting wii connection...\n");
+        wii_state_set(WII_PAIRING);
+        ESP_LOGI(TAG, "accepting wii connection...");
         post_bt_packet(create_hci_accept_connection_request_packet(packet->addr, HCI_ROLE_SLAVE));
     }
     else
     {
-        printf("rejecting unknown connection...\n");
+        ESP_LOGI(TAG, "rejecting unknown connection...");
         post_bt_packet(create_hci_reject_connection_request_packet(packet->addr, ERROR_CODE_CONNECTION_REJECTED_DUE_TO_UNACCEPTABLE_BD_ADDR));
     }
 }
 
 void handle_pin_code_request(HCI_PIN_CODE_REQUEST_EVENT_PACKET* packet)
 {
-    printf("pin code request from %s...\n", bda_to_string(packet->addr));
+    ESP_LOGI(TAG, "pin code request from %s...", bda_to_string(packet->addr));
 
     uint8_t pin[6];
     memcpy(pin, packet->addr, BDA_SIZE);
-    printf("sending pin code %02x %02x %02x %02x %02x %02x\n", pin[0], pin[1], pin[2], pin[3], pin[4], pin[5]);
+    ESP_LOGI(TAG, "sending pin code %02x %02x %02x %02x %02x %02x", pin[0], pin[1], pin[2], pin[3], pin[4], pin[5]);
 
     post_bt_packet(create_hci_pin_code_request_reply_packet(packet->addr, pin, BDA_SIZE));
 }
@@ -251,11 +263,11 @@ void handle_mode_change(HCI_MODE_CHANGE_EVENT_PACKET* packet)
 {
     if (packet->current_mode == HCI_MODE_SNIFF)
     {
-        switch (wii_state)
+        switch (wii_state_get())
         {
             case WII_PAIRING:
-                wii_state = WII_IDLE;
-                printf("pairing complete!\n");
+                wii_state_set(WII_IDLE);
+                ESP_LOGI(TAG, "pairing complete!");
                 post_bt_packet(create_hci_disconnect_packet(packet->con_handle, ERROR_CODE_REMOTE_USER_TERMINATED_CONNECTION));
                 break;
             default:
@@ -266,12 +278,12 @@ void handle_mode_change(HCI_MODE_CHANGE_EVENT_PACKET* packet)
 
 void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
 {
-    printf("link key request from %s...\n", bda_to_string(packet->addr));
+    ESP_LOGI(TAG, "link key request from %s...", bda_to_string(packet->addr));
 
-    switch (wii_state)
+    switch (wii_state_get())
     {
         case WII_PAIRING:
-            printf("rejecting link key request from %s...\n", bda_to_string(packet->addr));
+            ESP_LOGI(TAG, "rejecting link key request from %s...", bda_to_string(packet->addr));
             post_bt_packet(create_hci_link_key_request_negative_packet(packet->addr));
             break;
         default:
@@ -281,7 +293,7 @@ void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
             esp_err_t err = nvs_get_blob(config_nvs_handle, LINK_KEY_BLOB_NAME, link_key, &size);
             if (err == ESP_OK && size == HCI_LINK_KEY_SIZE)
             {
-                printf("returning stored link key");
+                ESP_LOGI(TAG, "returning stored link key");
                 for (int i = 0; i < HCI_LINK_KEY_SIZE; i++)
                 {
                     printf(" %02x", link_key[i]);
@@ -309,7 +321,7 @@ void peek_number_of_completed_packets(uint8_t* packet, uint16_t size)
         //uint16_t con_handle = read_uint16(p);
         uint16_t num_completed = read_uint16(p + 2);
 
-        //printf("peek number_of_completed_packets handle 0x%x completed %u\n", con_handle, num_completed);
+        //ESP_LOGI(TAG, "peek number_of_completed_packets handle 0x%x completed %u", con_handle, num_completed);
 
         for (int j = 0; j < num_completed; j++)
         {
@@ -339,7 +351,7 @@ void handle_command_complete(uint8_t* packet, uint16_t size)
 
 void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
 {
-    //printf("l2cap connection request con_handle 0x%x id 0x%x psm 0x%x source_cid 0x%x\n", packet->con_handle, packet->identifier, packet->psm, packet->source_cid);
+    //ESP_LOGI(TAG, "l2cap connection request con_handle 0x%x id 0x%x psm 0x%x source_cid 0x%x", packet->con_handle, packet->identifier, packet->psm, packet->source_cid);
 
     wii_con_handle = packet->con_handle;
     uint16_t response_dest_cid;
@@ -350,19 +362,19 @@ void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
         case SDP_PSM:
             wii_sdp_cid = packet->source_cid;
             response_dest_cid = SDP_LOCAL_CID;
-            printf("set wii_con_handle 0x%x wii_sdp_cid=0x%x\n", wii_con_handle, wii_sdp_cid);
+            ESP_LOGI(TAG, "set wii_con_handle 0x%x wii_sdp_cid=0x%x", wii_con_handle, wii_sdp_cid);
             break;
         case WII_CONTROL_PSM:
             wii_control_cid = packet->source_cid;
             response_dest_cid = WII_CONTROL_LOCAL_CID;
             //result = L2CAP_CONNECTION_RESULT_PENDING;
-            printf("set wii_con_handle 0x%x wii_control_cid=0x%x\n", wii_con_handle, wii_control_cid);
+            ESP_LOGI(TAG, "set wii_con_handle 0x%x wii_control_cid=0x%x", wii_con_handle, wii_control_cid);
             break;
         case WII_DATA_PSM:
             wii_data_cid = packet->source_cid;
             response_dest_cid = WII_DATA_LOCAL_CID;
             //result = L2CAP_CONNECTION_RESULT_PENDING;
-            printf("set wii_con_handle 0x%x wii_data_cid=0x%x\n", wii_con_handle, wii_data_cid);
+            ESP_LOGI(TAG, "set wii_con_handle 0x%x wii_data_cid=0x%x", wii_con_handle, wii_data_cid);
             break;
         default:
             response_dest_cid = 0;
@@ -371,7 +383,7 @@ void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
 
     if (response_dest_cid == 0)
     {
-        printf("connection request no matching psm 0x%x\n", packet->psm);
+        ESP_LOGI(TAG, "connection request no matching psm 0x%x", packet->psm);
         return;
     }
 
@@ -390,7 +402,7 @@ void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
 {
     if (packet->status == ERROR_CODE_SUCCESS && packet->result == L2CAP_CONNECTION_RESULT_SUCCESS)
     {
-        switch (wii_state)
+        switch (wii_state_get())
         {
         case WII_QUERY_POWER_STATE:
         case WII_POWER_ON:
@@ -433,7 +445,7 @@ void handle_l2cap_config_request(L2CAP_CONFIG_REQUEST_PACKET* packet)
 
     if (cid == 0)
     {
-        printf("l2cap config request no matching cid for 0x%x\n", packet->dest_cid);
+        ESP_LOGI(TAG, "l2cap config request no matching cid for 0x%x", packet->dest_cid);
         return;
     }
 
@@ -485,14 +497,14 @@ void handle_l2cap_signal_channel(L2CAP_SIGNAL_CHANNEL_PACKET* packet)
             handle_l2cap_disconnection_response((L2CAP_DISCONNECTION_RESPONSE_PACKET*)packet);
             break;
         default:
-            printf("unhandled signal channel code 0x%02x\n", packet->code);
+            ESP_LOGI(TAG, "unhandled signal channel code 0x%02x", packet->code);
             break;
     }
 }
 
 void handle_disconnection_complete(HCI_DISCONNECTION_COMPLETE_EVENT_PACKET* packet)
 {
-    led_set_rgb_color(0, 255, 0);
+    //led_set_rgb_color(0, 255, 0);
     wii_con_handle = INVALID_CON_HANDLE;
     xSemaphoreGive(wii_response_sem);
 }
@@ -512,7 +524,7 @@ int queue_packet_handler(uint8_t* packet, uint16_t size)
 
     if (xQueueSend(queue_handle, &env, 0) != pdPASS)
     {
-        printf("queue full (recv)\n");
+        ESP_LOGI(TAG, "queue full (recv)");
         xQueueSend(queue_handle, &env, portMAX_DELAY);
     }
 
@@ -521,14 +533,14 @@ int queue_packet_handler(uint8_t* packet, uint16_t size)
 
 void handle_authentication_complete(HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET* packet)
 {
-    printf("auth complete con_handle 0x%x status 0x%x\n", packet->con_handle, packet->status);
+    ESP_LOGI(TAG, "auth complete con_handle 0x%x status 0x%x", packet->con_handle, packet->status);
 
-    switch (wii_state)
+    switch (wii_state_get())
     {
         case WII_PAIRING:
             if (packet->status == ERROR_CODE_SUCCESS)
             {
-                printf("storing wii address %s\n", bda_to_string(wii_addr));
+                ESP_LOGI(TAG, "storing wii address %s", bda_to_string(wii_addr));
                 nvs_set_blob(config_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, BDA_SIZE);
             }
             break;
@@ -543,13 +555,13 @@ void post_hid_request_reponse(uint16_t con_handle, HID_REPORT_PACKET* packet, ui
 
     for (int i = 0; i < wii_hid_request_responses_size; i++)
     {
-        const WII_REQUEST_RESPONSE* rr = &wii_hid_request_responses[i];
+        const wii_request_response_t* rr = &wii_hid_request_responses[i];
         if (size == rr->request_size && memcmp(p, rr->request, size) == 0)
         {
             post_hid_report_packet(con_handle, (uint8_t*)rr->response, rr->response_size);
             for (int j = i + 1; j < wii_hid_request_responses_size; j++)
             {
-                const WII_REQUEST_RESPONSE* rr2 = &wii_hid_request_responses[j];
+                const wii_request_response_t* rr2 = &wii_hid_request_responses[j];
                 if (rr2->request_size == 0 && rr2->request == NULL && rr2->response_size > 0)
                 {
                     post_hid_report_packet(con_handle, (uint8_t*)rr2->response, rr2->response_size);
@@ -563,7 +575,7 @@ void post_hid_request_reponse(uint16_t con_handle, HID_REPORT_PACKET* packet, ui
         }
     }
 
-    printf("no hid request response post_wii_remote_hid_report_packet(, \"");
+    ESP_LOGI(TAG, "no hid request response post_wii_remote_hid_report_packet(, \"");
     for (int i = 0; i < size; i++)
     {
         printf("\\x%02x", p[i]);
@@ -588,7 +600,7 @@ void post_sdp_packet(uint16_t con_handle, uint16_t l2cap_size, uint8_t* data, ui
     sdp_packet_index++;
     sdp_fragment_index = 0;
 
-    printf("sdp request %d.%d \"", sdp_packet_index, sdp_fragment_index);
+    ESP_LOGI(TAG, "sdp request %d.%d \"", sdp_packet_index, sdp_fragment_index);
     for (int i = 0; i < data_size; i++)
     {
         printf("\\x%02x", data[i]);
@@ -602,7 +614,7 @@ void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_
 {
     sdp_fragment_index++;
 
-    printf("sdp request %d.%d \"", sdp_packet_index, sdp_fragment_index);
+    ESP_LOGI(TAG, "sdp request %d.%d \"", sdp_packet_index, sdp_fragment_index);
     for (int i = 0; i < data_size; i++)
     {
         printf("\\x%02x", data[i]);
@@ -615,7 +627,7 @@ void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_
 
 void handle_data_channel(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_t size)
 {
-    switch (wii_state)
+    switch (wii_state_get())
     {
     case WII_PAIRING:
         switch (packet->report_type)
@@ -626,7 +638,7 @@ void handle_data_channel(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_
                 break;
             }
             default:
-                printf("unhandled HID report type 0x%x\n", packet->report_type);
+                ESP_LOGI(TAG, "unhandled HID report type 0x%x", packet->report_type);
                 break;
         }
         break;
@@ -639,13 +651,13 @@ void handle_sdp_channel(L2CAP_PACKET* packet)
 {
     for (int i = 0; i < wii_sdp_request_responses_size; i++)
     {
-        const WII_REQUEST_RESPONSE* rr = &wii_sdp_request_responses[i];
+        const wii_request_response_t* rr = &wii_sdp_request_responses[i];
         if (packet->l2cap_size == rr->request_size && memcmp(packet->data, rr->request, packet->l2cap_size) == 0)
         {
             uint16_t l2cap_size = rr->response_size;
             for (int j = i + 1; j < wii_sdp_request_responses_size; j++)
             {
-                const WII_REQUEST_RESPONSE* rr2 = &wii_sdp_request_responses[j];
+                const wii_request_response_t* rr2 = &wii_sdp_request_responses[j];
                 if (rr2->request_size == 0 && rr2->request == NULL && rr2->response_size > 0)
                 {
                     l2cap_size += rr2->response_size;
@@ -659,7 +671,7 @@ void handle_sdp_channel(L2CAP_PACKET* packet)
             post_sdp_packet(wii_con_handle, l2cap_size, (uint8_t*)rr->response, rr->response_size);
             for (int j = i + 1; j < wii_sdp_request_responses_size; j++)
             {
-                const WII_REQUEST_RESPONSE* rr2 = &wii_sdp_request_responses[j];
+                const wii_request_response_t* rr2 = &wii_sdp_request_responses[j];
                 if (rr2->request_size == 0 && rr2->request == NULL && rr2->response_size > 0)
                 {
                     post_sdp_packet_fragment(wii_con_handle, (uint8_t*)rr2->response, rr2->response_size);
@@ -673,7 +685,7 @@ void handle_sdp_channel(L2CAP_PACKET* packet)
         }
     }
 
-    printf("no sdp response request post_sdp_packet(L2CAP_AUTO_SIZE, (uint8_t*)\"");
+    ESP_LOGI(TAG, "no sdp response request post_sdp_packet(L2CAP_AUTO_SIZE, (uint8_t*)\"");
     for (int i = 0; i < packet->l2cap_size; i++)
     {
         printf("\\x%02x", packet->data[i]);
@@ -741,13 +753,13 @@ void wii_packet_handler(uint8_t* packet, uint16_t size)
                         handle_data_channel(l2cap_packet->con_handle, (HID_REPORT_PACKET*)l2cap_packet->data, l2cap_packet->l2cap_size);
                         break;
                     default:
-                        printf("unhandled l2cap channel 0x%x con_handle 0x%x\n", l2cap_packet->channel, l2cap_packet->con_handle);
+                        ESP_LOGI(TAG, "unhandled l2cap channel 0x%x con_handle 0x%x", l2cap_packet->channel, l2cap_packet->con_handle);
                         break;
                 }
             }
             else
             {
-                printf("bad packet_boundary_flag 0x%x\n", acl_packet->packet_boundary_flag);
+                ESP_LOGI(TAG, "bad packet_boundary_flag 0x%x", acl_packet->packet_boundary_flag);
             }
             break;
         }
@@ -770,7 +782,7 @@ void post_l2ap_config_mtu_request(uint16_t con_handle, uint16_t remote_cid, uint
 
 void post_hid_report_packet(uint16_t con_handle, const uint8_t* report, uint16_t report_size)
 {
-    printf("send hid report \"");
+    ESP_LOGI(TAG, "send hid report \"");
     for (int i = 0; i < report_size; i++)
     {
         printf("\\x%02x", report[i]);
@@ -785,7 +797,7 @@ void post_bt_packet(BT_PACKET_ENVELOPE* env)
     env->io_direction = OUTPUT_PACKET;
     if (xQueueSend(queue_handle, &env, 0) != pdTRUE)
     {
-        printf("queue full (send)\n");
+        ESP_LOGI(TAG, "queue full (send)");
         xQueueSend(queue_handle, &env, portMAX_DELAY);
     }
 }
@@ -798,17 +810,17 @@ esp_err_t wii_init()
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    ESP_ERROR_CHECK(gpio_isr_register(wii_pair_irq_handler, NULL, 0, NULL));
+    //ESP_ERROR_CHECK(gpio_isr_register(wii_pair_irq_handler, NULL, 0, NULL));
 
     size_t size = BDA_SIZE;
     esp_err_t err = nvs_get_blob(config_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, &size);
     if (err == ESP_OK && size == BDA_SIZE)
     {
-        printf("wii addr %s\n", bda_to_string(wii_addr));
+        ESP_LOGI(TAG, "wii addr %s", bda_to_string(wii_addr));
     }
 
     bd_addr_t addr = { 0x00, 0x19, 0x1d, 0x54, 0xd1, 0xa0 };
@@ -816,11 +828,11 @@ esp_err_t wii_init()
     err = esp_base_mac_addr_set(addr);
     ESP_ERROR_CHECK(err);
 
-    // if (!btStart())
-    // {
-    //     printf("btStart failed\n");
-    //     abort();
-    // }
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    esp_bt_mode_t mode = ESP_BT_MODE_CLASSIC_BT;
+    bt_cfg.mode = mode;
+    ESP_RETURN_ON_ERROR(esp_bt_controller_init(&bt_cfg),TAG, "%s/esp_bt_controller_init enable controller failed: %s", __func__, esp_err_to_name(err_rc_));
+    ESP_RETURN_ON_ERROR(esp_bt_controller_enable(mode), TAG, "%s/esp_bt_controller_enable failed: %s", __func__, esp_err_to_name(err_rc_));
 
     static esp_vhci_host_callback_t vhci_host_cb =
     {
@@ -849,6 +861,8 @@ esp_err_t wii_init()
     post_bt_packet(create_hci_host_buffer_size_packet(HOST_ACL_BUFFER_SIZE, HOST_SCO_BUFFER_SIZE, HOST_NUM_ACL_BUFFERS, HOST_NUM_SCO_BUFFERS));
     post_bt_packet(create_hci_set_controller_to_host_flow_control_packet(HCI_FLOW_CONTROL_ACL));
 
+    xTaskCreate(pairing_task, "wii_pairing", 8000, NULL, 1, NULL);
+
     return ESP_OK;
 }
 
@@ -857,16 +871,16 @@ void wii_connect()
     bd_addr_t null_addr = { };
     if (memcmp(wii_addr, null_addr, BDA_SIZE) == 0)
     {
-        printf("can't connect to wii--addr not set\n");
+        ESP_LOGI(TAG, "can't connect to wii--addr not set");
         return;
     }
-    led_set_rgb_color(0, 0, 255);
+    //led_set_rgb_color(0, 0, 255);
     post_bt_packet(create_hci_create_connection_packet(wii_addr, WII_PACKET_TYPES, 1, true, 0, 1));
 }
 
 bool wii_command(wii_state_t state, uint8_t on_disconnect_reason, uint8_t off_disconnect_reason)
 {
-    wii_state = state;
+    wii_state_set(state);
     wii_on = false;
     wii_con_handle = INVALID_CON_HANDLE;
     wii_disconnect_reason = on_disconnect_reason;
@@ -874,13 +888,13 @@ bool wii_command(wii_state_t state, uint8_t on_disconnect_reason, uint8_t off_di
     xSemaphoreTake(wii_response_sem, 0);
     wii_connect();
     xSemaphoreTake(wii_response_sem, WII_TIMEOUT_TICKS);
-    if (wii_state == WII_ERROR)
+    if (wii_state_get() == WII_ERROR)
     {
-        printf("wii command error\n");
+        ESP_LOGI(TAG, "wii command error");
         return false;
     }
-    printf("wii is %s\n", wii_on ? "on" : "off");
-    wii_state = WII_ABORT;
+    ESP_LOGI(TAG, "wii is %s", wii_on ? "on" : "off");
+    wii_state_set(WII_ABORT);
     wii_disconnect_reason = off_disconnect_reason;
     if (wii_con_handle != INVALID_CON_HANDLE)
     {
@@ -925,22 +939,59 @@ wii_power_status_t wii_power_off()
     return wii_on ? WII_POWER_STATUS_TOGGLED : WII_POWER_STATUS_NOT_TOGGLED;
 }
 
-void wii_pair()
+// void wii_pair()
+// {
+//     if (wii_state == WII_PAIRING_PENDING || wii_state == WII_PAIRING)
+//     {
+//         return;
+//     }
+//     if (pairing_task_handle != NULL)
+//     {
+//         vTaskDelete(pairing_task_handle);
+//         pairing_task_handle = NULL;
+//     }
+//     wii_state = WII_PAIRING_PENDING;
+//     xTaskCreate(pairing_task, "wii_pairing", 8000, NULL, 1, &pairing_task_handle);
+// }
+
+// void wii_pair_irq_handler(void* arg)
+// {
+//     wii_pair_request = true;
+//     ets_ESP_LOGI(TAG, "wii pair request");
+// }
+
+wii_state_t wii_state_get()
 {
-    if (wii_state == WII_PAIRING_PENDING || wii_state == WII_PAIRING)
-    {
-        return;
-    }
-    if (pairing_task_handle != NULL)
-    {
-        vTaskDelete(pairing_task_handle);
-        pairing_task_handle = NULL;
-    }
-    wii_state = WII_PAIRING_PENDING;
-    xTaskCreate(pairing_task, "wii_pairing", 8000, NULL, 1, &pairing_task_handle);
+    taskENTER_CRITICAL(&wii_mux);
+    wii_state_t state = wii_state;
+    taskEXIT_CRITICAL(&wii_mux);
+    return state;
 }
 
-void wii_pair_irq_handler(void* arg)
+void wii_state_set(wii_state_t state)
 {
-    wii_pair_request = true;
+    taskENTER_CRITICAL(&wii_mux);
+    wii_state_t old_state = wii_state;
+    wii_state = state;
+    taskEXIT_CRITICAL(&wii_mux);
+
+    ESP_LOGI(TAG, "wii state set  to %u", state);
+
+    if (old_state == WII_PAIRING || old_state == WII_PAIRING_PENDING)
+    {
+        switch (state)
+        {
+        case WII_PAIRING:
+            led_set_rgb_color(0, 0, 255);
+            break;
+        case WII_PAIRING_PENDING:
+            break;
+        case WII_IDLE:    
+            break;
+        default:
+            led_set_rgb_color(255, 0, 0);
+            break;
+        }
+    }
+
 }
