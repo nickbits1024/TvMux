@@ -13,11 +13,11 @@ extern "C"
 
 #define TVMUX_MAX_COMMAND_RETRY          3
 
-#ifdef __cplusplus
-extern "C" nvs_handle config_nvs_handle;
-#else
-extern nvs_handle config_nvs_handle;
-#endif
+// #ifdef __cplusplus
+// extern "C" nvs_handle config_nvs_handle;
+// #else
+// extern nvs_handle config_nvs_handle;
+// #endif
 
 typedef enum 
 {

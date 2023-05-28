@@ -1,7 +1,4 @@
-#define TVMUX_HOTPLUG_GPIO_NUM          (GPIO_NUM_18)
-#define TVMUX_HOTPLUG_GPIO_SEL          (1ull << TVMUX_HOTPLUG_GPIO_NUM)
-
-#define TVMUX_SETUP_GPIO_NUM            (GPIO_NUM_19)
+#define TVMUX_SETUP_GPIO_NUM            (GPIO_NUM_18)
 #define TVMUX_SETUP_GPIO_SEL            (1ull << TVMUX_SETUP_GPIO_NUM)
 
 #define TVMUX_SETUP_ENABLED             (1)
@@ -12,7 +9,7 @@
 #define TVMUX_STEAM_PING_COUNT          (2)
 #define TVMUX_STEAM_PING_INTERVAL       (500)
 
-#define HTTP_SUCCESS(http_code) ((http_code) >= 200 && (http_code) <= 299)
+#define HTTP_SUCCESS(http_code)         ((http_code) >= 200 && (http_code) <= 299)
 
 uint8_t readI2CByte(uint8_t data_addr);
 bool parse_edid(unsigned char* edid);

@@ -27,6 +27,7 @@ SemaphoreHandle_t all_controller_buffers_sem;
 //TaskHandle_t pairing_task_handle;
 int all_controller_buffers_sem_count;
 static portMUX_TYPE wii_mux = portMUX_INITIALIZER_UNLOCKED;
+static nvs_handle wii_nvs_handle;
 bool wii_on;
 uint16_t wii_con_handle;
 uint16_t wii_sdp_cid;
@@ -123,7 +124,7 @@ void pairing_task(void* p)
         {
             if (wii_state_get() != WII_PAIRING_PENDING && wii_state_get() != WII_PAIRING)
             {
-                ESP_LOGE(TAG, "wii_state changed to %u", wii_state_get());
+                ESP_LOGI(TAG, "wii_state changed to %u", wii_state_get());
                 break;
             }
             // if (wii_state_get() == WII_PAIRING)
@@ -146,7 +147,7 @@ void pairing_task(void* p)
             wii_state_set(WII_IDLE);
 
             led_set_rgb_color(255, 0, 0);
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
 
         post_bt_packet(create_hci_write_scan_enable_packet(0));
@@ -266,6 +267,8 @@ void handle_mode_change(HCI_MODE_CHANGE_EVENT_PACKET* packet)
         switch (wii_state_get())
         {
             case WII_PAIRING:
+                ESP_LOGI(TAG, "storing wii address %s", bda_to_string(wii_addr));
+                ESP_ERROR_CHECK(nvs_set_blob(wii_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, BDA_SIZE));
                 wii_state_set(WII_IDLE);
                 ESP_LOGI(TAG, "pairing complete!");
                 post_bt_packet(create_hci_disconnect_packet(packet->con_handle, ERROR_CODE_REMOTE_USER_TERMINATED_CONNECTION));
@@ -290,7 +293,7 @@ void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
         {
             uint8_t link_key[HCI_LINK_KEY_SIZE];
             size_t size = HCI_LINK_KEY_SIZE;
-            esp_err_t err = nvs_get_blob(config_nvs_handle, LINK_KEY_BLOB_NAME, link_key, &size);
+            esp_err_t err = nvs_get_blob(wii_nvs_handle, LINK_KEY_BLOB_NAME, link_key, &size);
             if (err == ESP_OK && size == HCI_LINK_KEY_SIZE)
             {
                 ESP_LOGI(TAG, "returning stored link key");
@@ -308,8 +311,7 @@ void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
 
 void handle_link_key_notification(HCI_LINK_KEY_NOTIFICATION_EVENT_PACKET* packet)
 {
-    esp_err_t err = nvs_set_blob(config_nvs_handle, LINK_KEY_BLOB_NAME, packet->link_key, HCI_LINK_KEY_SIZE);
-    ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(nvs_set_blob(wii_nvs_handle, LINK_KEY_BLOB_NAME, packet->link_key, HCI_LINK_KEY_SIZE));
 }
 
 void peek_number_of_completed_packets(uint8_t* packet, uint16_t size)
@@ -400,6 +402,7 @@ void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
 
 void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
 {
+    ESP_LOGI(TAG, "handle_l2cap_connection_response %u %u", packet->status, packet->result);
     if (packet->status == ERROR_CODE_SUCCESS && packet->result == L2CAP_CONNECTION_RESULT_SUCCESS)
     {
         switch (wii_state_get())
@@ -535,18 +538,18 @@ void handle_authentication_complete(HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET* pa
 {
     ESP_LOGI(TAG, "auth complete con_handle 0x%x status 0x%x", packet->con_handle, packet->status);
 
-    switch (wii_state_get())
-    {
-        case WII_PAIRING:
-            if (packet->status == ERROR_CODE_SUCCESS)
-            {
-                ESP_LOGI(TAG, "storing wii address %s", bda_to_string(wii_addr));
-                nvs_set_blob(config_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, BDA_SIZE);
-            }
-            break;
-        default:
-            break;
-    }
+    // switch (wii_state_get())
+    // {
+    //     case WII_PAIRING:
+    //         if (packet->status == ERROR_CODE_SUCCESS)
+    //         {
+    //             ESP_LOGI(TAG, "storing wii address %s", bda_to_string(wii_addr));
+    //             ESP_ERROR_CHECK(nvs_set_blob(wii_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, BDA_SIZE));
+    //         }
+    //         break;
+    //     default:
+    //         break;
+    // }
 }
 
 void post_hid_request_reponse(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_t size)
@@ -717,7 +720,7 @@ void wii_packet_handler(uint8_t* packet, uint16_t size)
                     break;
                 case HCI_EVENT_AUTHENTICATION_COMPLETE:
                     handle_authentication_complete((HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET*)packet);
-                    break; // WAS THIS A BUG ???
+                    break;
                 case HCI_EVENT_CONNECTION_REQUEST:
                     handle_connection_request((HCI_CONNECTION_REQUEST_EVENT_PACKET*)packet);
                     break;
@@ -816,8 +819,10 @@ esp_err_t wii_init()
 
     //ESP_ERROR_CHECK(gpio_isr_register(wii_pair_irq_handler, NULL, 0, NULL));
 
+    ESP_ERROR_CHECK(nvs_open("wii", NVS_READWRITE, &wii_nvs_handle));
+
     size_t size = BDA_SIZE;
-    esp_err_t err = nvs_get_blob(config_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, &size);
+    esp_err_t err = nvs_get_blob(wii_nvs_handle, WII_ADDR_BLOB_NAME, wii_addr, &size);
     if (err == ESP_OK && size == BDA_SIZE)
     {
         ESP_LOGI(TAG, "wii addr %s", bda_to_string(wii_addr));
@@ -977,20 +982,32 @@ void wii_state_set(wii_state_t state)
 
     ESP_LOGI(TAG, "wii state set  to %u", state);
 
-    if (old_state == WII_PAIRING || old_state == WII_PAIRING_PENDING)
+    if (old_state != state)
     {
-        switch (state)
+        if (old_state == WII_PAIRING || old_state == WII_PAIRING_PENDING)
         {
-        case WII_PAIRING:
-            led_set_rgb_color(0, 0, 255);
-            break;
-        case WII_PAIRING_PENDING:
-            break;
-        case WII_IDLE:    
-            break;
-        default:
-            led_set_rgb_color(255, 0, 0);
-            break;
+            bool new_color = false;
+
+            switch (state)
+            {
+            case WII_PAIRING:
+                led_set_rgb_color(0, 0, 255);
+                new_color = true;
+                break;
+            case WII_PAIRING_PENDING:
+                break;
+            case WII_IDLE:    
+                break;
+            default:
+                led_set_rgb_color(255, 0, 0);
+                new_color = true;
+                break;
+            }
+
+            if (new_color)
+            {
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
         }
     }
 

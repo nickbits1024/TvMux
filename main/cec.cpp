@@ -12,6 +12,7 @@
 #include <nvs_flash.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
+#include "ddc.h"
 #include "cec.h"
 #include "cec_int.h"
 #include "TvMux.h"
@@ -20,11 +21,19 @@ extern uint16_t cec_physical_address;
 
 #define TAG "CEC"
 
-HomeTvCec device;
+static HomeTvCec* cec_device;
 
 esp_err_t cec_init()
 {
     gpio_config_t io_conf;
+
+    io_conf.pin_bit_mask = HDMI_HOTPLUG_GPIO_SEL;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
 
     io_conf.pin_bit_mask = CEC_GPIO_INPUT_SEL;
     io_conf.mode = GPIO_MODE_INPUT;
@@ -44,8 +53,9 @@ esp_err_t cec_init()
 
     ESP_ERROR_CHECK(gpio_set_level(CEC_GPIO_OUTPUT_NUM, 1));
 
-    device.Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
+#ifdef HDMI_CEC
     xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
+#endif
 
     return ESP_OK;
 }
@@ -470,46 +480,114 @@ void HomeTvCec::LoadPowerState(uint8_t addr)
 
 void cec_loop(void* param)
 {
-    while (1)
+    for (;;)
     {
-        device.Run();
+        ESP_LOGI(TAG, "Waiting for hotplug signal...");
+        // FIXME
+        // while (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
+        // { 
+        //     vTaskDelay(50 / portTICK_PERIOD_MS);
+        // }
+
+        ESP_LOGI(TAG, "Hotplug signal detected!\n");
+
+        uint8_t edid[DDC_EDID_LENGTH];
+        uint8_t edid_extension[DDC_EDID_EXTENSION_LENGTH];
+
+        do
+        {
+            for (int i = 0; i < DDC_EDID_LENGTH; i++)
+            {
+                ESP_ERROR_CHECK(ddc_read_byte(DDC_EDID_ADDRESS, i, &edid[i]));
+                //printf("%02x ", edid[i]);
+            }
+            // printf("\n");
+            // ESP_LOGI(TAG, "Received EDID");        
+            // vTaskDelay(5000 / portTICK_PERIOD_MS);
+        } while (!cec_edid_parse(edid));
+
+        if (edid[DDC_EDID_EXTENSION_FLAG])
+        {
+            do
+            {
+                for (int i = 0; i < DDC_EDID_EXTENSION_LENGTH; i++)
+                {
+                    ESP_ERROR_CHECK(ddc_read_byte(DDC_EDID_ADDRESS, DDC_EDID_LENGTH + i, &edid_extension[i]));
+                }
+
+                ESP_LOGI(TAG, "Received EDID extension");
+
+            } while (!cec_edid_extension_parse(edid, edid_extension));
+        }
+        cec_device = new HomeTvCec;
+        
+        cec_device->Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
+
+        for (;;)
+        {
+            // FIXME
+            // if (gpio_get_level(gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
+            // {
+            //     ESP_LOGE(TAG, "hdmi cable unplugged");
+            //     break;
+            // }
+
+            cec_device->Run();
+        }
+
+        delete cec_device;
     }
+
+    vTaskDelete(NULL);
 }
 
 esp_err_t cec_queue_clear()
 {
-    device.ClearPending();
+    if (cec_device != NULL)
+    {
+        cec_device->ClearPending();
+    }
     return ESP_OK;
 }
 
 
 esp_err_t cec_standby()
 {
-    device.StandBy();
+    if (cec_device != NULL)
+    {
+        cec_device->StandBy();
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_pause()
 {
-    device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, 0x46);
+    if (cec_device != NULL)
+    {
+        cec_device->UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, 0x46);
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_play()
 {
-    device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, 0x44);
+    if (cec_device != NULL)
+    {
+        cec_device->UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, 0x44);
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv)
 {
-#ifndef HDMI_CEC
-    *state = false;
-    return ESP_OK;
-#endif
+    if (cec_device == NULL)
+    {
+        *state = false;
+        return ESP_OK;
+    }
 
     bool combined_on = and_mode;
 
@@ -553,17 +631,20 @@ esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool au
 
     auto check_device = [and_mode, &combined_on](int target_address) {
 
-        auto power_state = device.GetPowerState(target_address);
-        bool device_on = power_state == CEC_POWER_ON || power_state == CEC_POWER_TRANS_ON;
+        if (cec_device != NULL)
+        {
+            auto power_state = cec_device->GetPowerState(target_address);
+            bool device_on = power_state == CEC_POWER_ON || power_state == CEC_POWER_TRANS_ON;
 
-        if (and_mode)
-        {
-            combined_on &= device_on;
-        }
-        else
-        {
-            combined_on |= device_on;
-        }
+            if (and_mode)
+            {
+                combined_on &= device_on;
+            }
+            else
+            {
+                combined_on |= device_on;
+            }
+        }        
     };
 
     if (tv)
@@ -595,16 +676,25 @@ void cec_tv_state_task(void* param)
     if (desired_state)
     {
         change_state = [] {
-            uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_ATV_HDMI_INPUT << 8;
-            device.SetActiveSource(addr);
-            device.TvScreenOn();
-            device.SystemAudioModeRequest(addr);
-            device.UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
+            if (cec_device != NULL)
+            {
+                uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_ATV_HDMI_INPUT << 8;
+                cec_device->SetActiveSource(addr);
+                cec_device->TvScreenOn();
+                cec_device->SystemAudioModeRequest(addr);
+                cec_device->UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
+            }
         };
     }
     else
     {
-        change_state = [] { device.StandBy(); };
+        change_state = [] 
+        { 
+            if (cec_device != NULL)
+            {
+                cec_device->StandBy(); 
+            }
+        };
     }
 
     if (tvmux_call_with_retry(TV_RETRY_FUNC, change_state, [desired_state] 
@@ -650,9 +740,12 @@ void wii_state_task(void* param)
         change_state = [] {
             auto status = wii_power_on();
             uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_WII_HDMI_INPUT << 8;
-            device.SetActiveSource(addr);
-            device.TvScreenOn();
-            device.SystemAudioModeRequest(addr);
+            if (cec_device != NULL)
+            {
+                cec_device->SetActiveSource(addr);
+                cec_device->TvScreenOn();
+                cec_device->SystemAudioModeRequest(addr);
+            }
             return status;
         };
     }
@@ -660,7 +753,10 @@ void wii_state_task(void* param)
     {
         change_state = [] {
             auto status = wii_power_off();
-            device.StandBy();
+            if (cec_device != NULL)
+            {
+                cec_device->StandBy();
+            }
             return status;
         };
     }
@@ -690,14 +786,20 @@ esp_err_t cec_wii_power(bool power_on)
 
 esp_err_t cec_log_write(httpd_req_t* request)
 {
-    device.WriteLog(request);
+    if (cec_device != NULL)
+    {
+        cec_device->WriteLog(request);
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_log_clear()
 {
-    device.ClearLog();
+    if (cec_device != NULL)
+    {
+        cec_device->ClearLog();
+    }
 
     return ESP_OK;
 }
@@ -705,28 +807,173 @@ esp_err_t cec_log_clear()
 
 esp_err_t cec_control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size)
 {
-    device.Control(target_address, request, request_size, reply_filter, reply, reply_size);
+    if (cec_device != NULL)
+    {
+        cec_device->Control(target_address, request, request_size, reply_filter, reply, reply_size);
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_as_set(uint8_t addr)
 {
-    device.SetActiveSource(addr);
+    if (cec_device != NULL)
+    {
+        cec_device->SetActiveSource(addr);
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_sam_request(uint8_t addr)
 {
-    device.SystemAudioModeRequest(addr);               
+    if (cec_device != NULL)
+    {
+        cec_device->SystemAudioModeRequest(addr);               
+    }
 
     return ESP_OK;
 }
 
 esp_err_t cec_tv_on()
 {
-    device.TvScreenOn();
+    if (cec_device != NULL)
+    {
+        cec_device->TvScreenOn();
+    }
 
     return ESP_OK;
+}
+
+bool cec_edid_parse(unsigned char* edid)
+{
+    uint32_t header0 = edid[0] << 24 | edid[1] << 16 | edid[2] << 8 | edid[3];
+    uint32_t header1 = edid[4] << 24 | edid[5] << 16 | edid[6] << 8 | edid[7];
+
+    uint32_t sum = 0;
+    for (int i = 0; i < DDC_EDID_LENGTH; i++)
+    {
+        sum += (uint32_t)edid[i];
+    }
+
+    //ESP_LOGI(TAG, "EDID checksum: %08lx\n", sum);
+    //ESP_LOGI(TAG, "EDID header: %08lx%08lx\n", header0, header1);
+
+    if (header0 != 0x00ffffff || header1 != 0xffffff00)
+    {
+        return false;
+    }
+
+    if (sum % 256 != 0)
+    {
+        return false;
+    }
+
+    uint16_t manufacturer0 = edid[0x08];
+    uint16_t manufacturer1 = edid[0x09];
+    char manufacturer[4];
+    manufacturer[0] = '@' + (int)((manufacturer0 >> 2) & 0x1f);
+    manufacturer[1] = '@' + (int)((manufacturer0 & 3) << 3 | ((manufacturer1 >> 5) & 0x7));
+    manufacturer[2] = '@' + (int)(manufacturer1 & 0x1f);
+    manufacturer[3] = 0;
+
+    uint8_t version = edid[0x12];
+    uint8_t revision = edid[0x13];
+    //uint8_t extension_flag = edid[EDID_EXTENSION_FLAG];
+
+    ESP_LOGI(TAG, "EDID version: %u.%u", version, revision);
+    ESP_LOGI(TAG, "EDID manufacturer: %s", manufacturer);
+    //ESP_LOGI(TAG, "EDID extension_flag: %d\n", extension_flag);
+
+    return true;
+    /*
+
+      uint8_t ieee0 = edid[0x95];
+      uint8_t ieee1 = edid[0x96];
+      uint8_t ieee2 = edid[0x97];
+      uint16_t physicalAddress = edid[0x98] << 8 | edid[0x99];
+
+      ESP_LOGI(TAG, "IEEE ID: %02x%02x%02x\n", ieee0, ieee1, ieee2);
+      uint8_t a0 = physicalAddress >> 12;
+      uint8_t a1 = (physicalAddress >> 8) & 0xf;
+      uint8_t a2 = (physicalAddress >> 4) & 0xf;
+      uint8_t a3 = physicalAddress & 0xf;
+      ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
+
+      return true;*/
+}
+
+bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
+{
+    uint32_t sum = 0;
+    for (int i = 0; i < DDC_EDID_EXTENSION_LENGTH; i++)
+    {
+        sum += (uint32_t)ext[i];
+    }
+
+    if (sum % 256 != 0)
+    {
+        return false;
+    }
+
+    //ESP_LOGI(TAG, "EDID ext checksum: %08x\n", sum);
+
+    uint8_t tag = ext[0];
+    //uint8_t revision = ext[1];
+    uint8_t dtd_offset = ext[2];
+    uint8_t offset = 4;
+
+    // ESP_LOGI(TAG, "EDID ext tag: %u\n", tag);
+    // ESP_LOGI(TAG, "EDID ext revision: %u\n", revision);
+    // ESP_LOGI(TAG, "EDID ext dtd_offset: %u\n", dtd_offset);
+
+    if (tag != 2)
+    {
+        return false;
+    }
+
+    // for (int i = 0; i < EDID_EXTENSION_LENGTH; i++)
+    // {
+    //   ESP_LOGI(TAG, "0x%02x, ", ext[i]);
+    // }
+    // ESP_LOGI(TAG, );
+
+    uint8_t index = offset;
+
+    while (index < dtd_offset)
+    {
+        uint8_t* p = ext + index;
+        uint8_t tag = p[0] >> 5;
+        uint8_t length = p[0] & 0x1f;
+
+        //ESP_LOGI(TAG, "EDID ext tag: %d length: %d\n", tag, length);
+
+        switch (tag)
+        {
+            case 3:
+            {
+                uint8_t ieee[3];
+                ieee[0] = p[3];
+                ieee[1] = p[2];
+                ieee[2] = p[1];
+                //ESP_LOGI(TAG, "EDID IEEE %02x %02x %02x\n", ieee[0], ieee[1], ieee[2]);
+                if (ieee[0] == 0x00 && ieee[1] == 0x0c && ieee[2] == 0x03)
+                {
+                    cec_physical_address = (uint16_t)p[4] << 8 | p[5];
+                    uint8_t a0 = cec_physical_address >> 12;
+                    uint8_t a1 = (cec_physical_address >> 8) & 0xf;
+                    uint8_t a2 = (cec_physical_address >> 4) & 0xf;
+                    uint8_t a3 = cec_physical_address & 0xf;
+
+                    ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
+
+                }
+                break;
+            }
+        }
+
+        index += 1 + length;
+    }
+
+    return true;
 }

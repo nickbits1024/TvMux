@@ -15,6 +15,7 @@ public:
 
 public:
 	CEC_Device();
+	virtual ~CEC_Device() {}
 	void Initialize(int physicalAddress, CEC_DEVICE_TYPE type, bool promiscuous = false, bool monitorMode = false);
 	bool TransmitFrame(int targetAddress, const unsigned char* buffer, int count);
 	void Run();

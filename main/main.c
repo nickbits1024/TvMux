@@ -41,7 +41,6 @@ void app_main(void)
     bool setup_enabled;
  
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&spiffs));
-
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(webserver_init());
     ESP_ERROR_CHECK(led_init());

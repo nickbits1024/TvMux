@@ -33,7 +33,7 @@
 #define WII_MTU                     (640)
 #define WII_FLUSH_TIMEOUT           (0xffff)
 
-#define WII_TIMEOUT_TICKS            (1000 / portTICK_PERIOD_MS)
+#define WII_TIMEOUT_TICKS            (2000 / portTICK_PERIOD_MS)
 typedef struct
 {
     const char* request;
