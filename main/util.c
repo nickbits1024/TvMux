@@ -88,12 +88,12 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
     }
     else if (dns_ret != ERR_OK)
     {
-        goto error;
+        goto cleanup;
     }
     
     if (!success)
     {
-        goto error;
+        goto cleanup;
     }
 
     esp_ping_config_t ping_config = ESP_PING_DEFAULT_CONFIG();
@@ -114,24 +114,20 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
     esp_ping_handle_t ping_handle = NULL;
 
     ESP_GOTO_ON_ERROR(esp_ping_new_session(&ping_config, &cbs, &ping_handle), 
-            error, TAG, "esp_ping_new_session (%s)", esp_err_to_name(err_rc_));
+            cleanup, TAG, "esp_ping_new_session (%s)", esp_err_to_name(err_rc_));
     ESP_GOTO_ON_ERROR(esp_ping_start(ping_handle), 
-            error, TAG, "esp_ping_start (%s)", esp_err_to_name(err_rc_));
+            cleanup, TAG, "esp_ping_start (%s)", esp_err_to_name(err_rc_));
 
     vTaskDelay((ping_config.count * ping_config.interval_ms + 500) / portTICK_PERIOD_MS);
 
-    esp_ping_delete_session(ping_handle);
-
     ESP_LOGI(TAG, "ping %08lx pong %d", addr.addr, *pongs);
 
-    return ESP_OK;
-
-error:
+cleanup:
     vSemaphoreDelete(sem);
     if (ping_handle != NULL)
     {
+        esp_ping_stop(ping_handle);
         esp_ping_delete_session(ping_handle);
-
     }
     return ret;
 }
@@ -205,7 +201,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t* evt)
                     {
                         ESP_LOGE(TAG, "could not allocate chunk");
                         ctx->result = ESP_ERR_NO_MEM;
-                        free(chunk);
+                        free(chunk_buffer);
                     }
                 }
                 else

@@ -39,19 +39,20 @@ static void health_timer_callback(void* arg)
 
 esp_err_t health_start()
 {
+    esp_err_t ret = ESP_OK;
     if (health_ping_handle != NULL)
     {        
-        ESP_RETURN_ON_ERROR(esp_ping_stop(health_ping_handle), 
+        ESP_GOTO_ON_ERROR(esp_ping_stop(health_ping_handle), cleanup,
             TAG, "esp_ping_stop (%s)", esp_err_to_name(err_rc_));
-        ESP_RETURN_ON_ERROR(esp_ping_delete_session(health_ping_handle), 
+        ESP_GOTO_ON_ERROR(esp_ping_delete_session(health_ping_handle), cleanup,
             TAG, "esp_ping_delete_session (%s)", esp_err_to_name(err_rc_));
         health_ping_handle = NULL;
     }
     if (health_timer_handle != NULL)
     {
-        ESP_RETURN_ON_ERROR(esp_timer_stop(health_timer_handle), 
+        ESP_GOTO_ON_ERROR(esp_timer_stop(health_timer_handle), cleanup,
             TAG, "esp_timer_stop (%s)", esp_err_to_name(err_rc_));
-        ESP_RETURN_ON_ERROR(esp_timer_delete(health_timer_handle), 
+        ESP_GOTO_ON_ERROR(esp_timer_delete(health_timer_handle), cleanup,
             TAG, "esp_timer_delete (%s)", esp_err_to_name(err_rc_));
 
         health_timer_handle = NULL;
@@ -91,7 +92,26 @@ esp_err_t health_start()
     ESP_RETURN_ON_ERROR(esp_timer_start_periodic(health_timer_handle, HEALTH_PING_INTERVAL * 2 * 1000),
         TAG, "esp_timer_start_periodic failed(%s)", esp_err_to_name(err_rc_));
 
-    return ESP_OK;
+cleanup:
+    if (ret != ESP_OK)
+    {
+        if (health_ping_handle != NULL)
+        {        
+            esp_ping_stop(health_ping_handle);
+            esp_ping_delete_session(health_ping_handle);
+            health_ping_handle = NULL;
+        }
+        if (health_timer_handle != NULL)
+        {
+            esp_timer_stop(health_timer_handle);
+            esp_timer_delete(health_timer_handle);
+
+            health_timer_handle = NULL;
+        }
+
+    }
+
+    return ret;
 }
 
 static void health_ping_success(esp_ping_handle_t hdl, void *args)

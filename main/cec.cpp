@@ -585,6 +585,7 @@ esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool au
 {
     if (cec_device == NULL)
     {
+        ESP_LOGE(TAG, "%s cec_device is NULL", __func__);
         *state = false;
         return ESP_OK;
     }
@@ -629,12 +630,12 @@ esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool au
     //     }
     // };
 
-    auto check_device = [and_mode, &combined_on](int target_address) {
+    auto check_device = [and_mode, &combined_on](int target_address, const char* name) {
 
         if (cec_device != NULL)
         {
             auto power_state = cec_device->GetPowerState(target_address);
-            bool device_on = power_state == CEC_POWER_ON || power_state == CEC_POWER_TRANS_ON;
+            bool device_on = power_state == CEC_POWER_ON || power_state == CEC_POWER_TRANS_ON;            
 
             if (and_mode)
             {
@@ -644,20 +645,22 @@ esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool au
             {
                 combined_on |= device_on;
             }
+
+            ESP_LOGI(TAG, "%s is %s, all combined is %s", name, device_on ? "on" : "off", combined_on ? "on" : "off");
         }        
     };
 
     if (tv)
     {
-        check_device(CEC_TV_ADDRESS);
+        check_device(CEC_TV_ADDRESS, "tv");
     }
     if (audio)
     {
-        check_device(CEC_AUDIO_SYSTEM_ADDRESS);
+        check_device(CEC_AUDIO_SYSTEM_ADDRESS, "audio");
     }
     if (atv)
     {
-        check_device(CEC_PLAYBACK_DEVICE_1_ADDRESS);
+        check_device(CEC_PLAYBACK_DEVICE_1_ADDRESS, "atv");
     }
 
     *state = combined_on;
@@ -705,7 +708,7 @@ void cec_tv_state_task(void* param)
                 return state == desired_state;
             }
             return false;
-        ; }, 2000, 5000))
+        ; }, 5000, 5000))
     {
         ESP_LOGI(TAG, "set_tv_state = %u succeeded", desired_state);
     }
@@ -766,7 +769,7 @@ void wii_state_task(void* param)
             bool state;
             return wii_query_power_state() == desired_wii_state &&
                 cec_combine_devices_state(&state, desired_av_state, true, true, false) == ESP_OK && state == desired_av_state; 
-        }, 5000, 1000))
+        }, 5000, 5000))
     {
         ESP_LOGI(TAG, "set_wii_state = %u succeeded", desired_state);
     }

@@ -14,6 +14,7 @@
 #include "config.h"
 #include "health.h"
 #include "wii.h"
+#include "cec.h"
 #include "ddc.h"
 #include "util.h"
 #include "cJSON.h"
@@ -45,6 +46,7 @@ void app_main(void)
     ESP_ERROR_CHECK(webserver_init());
     ESP_ERROR_CHECK(led_init());
     ESP_ERROR_CHECK(ddc_init());
+    ESP_ERROR_CHECK(cec_init());
     ESP_ERROR_CHECK(tvmux_init(&setup_enabled));
     if (setup_enabled)
     {
