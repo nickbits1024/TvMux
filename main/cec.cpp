@@ -502,7 +502,7 @@ void cec_loop(void* param)
                 //printf("%02x ", edid[i]);
             }
             // printf("\n");
-            // ESP_LOGI(TAG, "Received EDID");        
+            ESP_LOGI(TAG, "Received EDID");        
             // vTaskDelay(5000 / portTICK_PERIOD_MS);
         } while (!cec_edid_parse(edid));
 
@@ -533,6 +533,7 @@ void cec_loop(void* param)
             // }
 
             cec_device->Run();
+            vTaskDelay(0);
         }
 
         delete cec_device;

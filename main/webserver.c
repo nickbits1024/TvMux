@@ -503,7 +503,7 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
         return ESP_FAIL;
     }
 
-    char reply_cmd_string[3];
+    char reply_cmd_string[3] = { };
     bool has_reply = httpd_query_key_value(qs, "reply", reply_cmd_string, sizeof(reply_cmd_string)) == ESP_OK;
 
     free(qs);
@@ -542,15 +542,15 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
     }
 
     //std::string reply_string;
-    char reply_string[CEC_MAX_MSG_SIZE * 3 + 1];
+    char reply_string[CEC_MAX_MSG_SIZE * 3 + 1] = { };
     const char* status = "ok";
 
     if (has_reply)
     {
         int reply_size = CEC_MAX_MSG_SIZE;
-        if (tvmux_cec_control(addr, cmd, len, (uint8_t)reply_filter, reply, &reply_size))
+        if (tvmux_cec_control(addr, cmd, len, (uint8_t)reply_filter, reply, &reply_size) == ESP_OK)
         {
-            format_bytes(reply_string, CEC_MAX_MSG_SIZE * 3 + 1, reply + 1, reply_size - 1);
+            format_bytes(reply_string, sizeof(reply_string), reply + 1, reply_size - 1);
         }
         else
         {
@@ -559,9 +559,9 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
     }
     else
     {
-        if (!tvmux_cec_control(addr, cmd, len, 0, NULL, NULL))
+        if (tvmux_cec_control(addr, cmd, len, 0, NULL, NULL) != ESP_OK)
         {
-            status = "error";
+            status = "error2";
         }
     }
 

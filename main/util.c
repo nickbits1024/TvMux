@@ -11,6 +11,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_check.h"
+#include "esp_netif.h"
 #include "util_int.h"
 #include "util.h"
 
@@ -28,7 +29,6 @@ void format_bytes(char* s, int n, const unsigned char* buffer, int count)
         j += 2;
     }
 }
-
 
 static void ping_success(esp_ping_handle_t hdl, void* args)
 {
@@ -120,7 +120,7 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
 
     vTaskDelay((ping_config.count * ping_config.interval_ms + 500) / portTICK_PERIOD_MS);
 
-    ESP_LOGI(TAG, "ping %08lx pong %d", addr.addr, *pongs);
+    ESP_LOGI(TAG, "ping " IPSTR " pong %d", IP2STR(&addr), *pongs);
 
 cleanup:
     vSemaphoreDelete(sem);

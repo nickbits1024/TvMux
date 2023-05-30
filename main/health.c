@@ -75,9 +75,9 @@ esp_err_t health_start()
     cbs.on_ping_timeout = health_ping_timeout;
     cbs.on_ping_end = health_ping_end;
 
-    ESP_RETURN_ON_ERROR(esp_ping_new_session(&ping_config, &cbs, &health_ping_handle), 
+    ESP_GOTO_ON_ERROR(esp_ping_new_session(&ping_config, &cbs, &health_ping_handle), cleanup,
             TAG, "esp_ping_new_session (%s)", esp_err_to_name(err_rc_));
-    ESP_RETURN_ON_ERROR(esp_ping_start(health_ping_handle), 
+    ESP_GOTO_ON_ERROR(esp_ping_start(health_ping_handle), cleanup,
             TAG, "esp_ping_start (%s)", esp_err_to_name(err_rc_));
 
     const esp_timer_create_args_t check_timer = {
