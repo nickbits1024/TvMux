@@ -56,7 +56,7 @@ esp_err_t tvmux_init(bool* setup_enabled)
     return ESP_OK;
 }
 
-bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check, int check_wait_ms, int retry_wait_ms)
+bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check)
 {
     int retry = 0;
     bool success;
@@ -67,7 +67,7 @@ bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::
         return false;
     }
 
-    led_push_rgb_color(255, 255, 0);
+    led_push_rgb_color(0, 0, 255);
 
     retry_function = func;
 
@@ -75,14 +75,14 @@ bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::
     {
         if (retry != 0)
         {
-            ESP_LOGE(TAG, "Control retry #%d in %dms", retry, retry_wait_ms);
-            vTaskDelay(retry_wait_ms / portTICK_PERIOD_MS);
+            ESP_LOGE(TAG, "Control retry #%d in %dms", retry, TVMUX_RETRY_CHECK_WAIT_MS);
+            vTaskDelay(TVMUX_RETRY_WAIT_MS / portTICK_PERIOD_MS);
         }
         f();
-        vTaskDelay(check_wait_ms / portTICK_PERIOD_MS);
+        vTaskDelay(TVMUX_RETRY_CHECK_WAIT_MS / portTICK_PERIOD_MS);
         success = check();
-        cec_queue_clear();
-    } while (retry++ < TVMUX_MAX_COMMAND_RETRY && !success);
+        //cec_queue_clear();
+    } while (retry++ < TVMUX_RETRY_MAX && !success);
 
     xSemaphoreGive(retry_sem);
 
@@ -175,7 +175,7 @@ void tvmux_steam_start()
 
     if (tvmux_steam_get("/api/steam/bigpicture/start"))
     {
-        ESP_LOGE(TAG, "tvmux_steam_start succeeded");
+        ESP_LOGI(TAG, "tvmux_steam_start succeeded");
     }
     else
     {
@@ -296,7 +296,7 @@ bool check_steam_topology()
             if (topology_value != NULL)
             {
                 external = strcasecmp(topology_value, "External") == 0;
-                ESP_LOGI(TAG, "topology: %s", topology_value);
+                ESP_LOGI(TAG, "topology: %s %d", topology_value, external);
             }
         }
         cJSON_Delete(json);
@@ -365,14 +365,14 @@ bool tvmux_steam_is_open()
             if (status_value != NULL)
             {
                 open = strcasecmp(status_value, "Open") == 0;
-                ESP_LOGI(TAG, "open: %s", status_value);
+                ESP_LOGI(TAG, "open: %s %d", status_value, open);
             }
         }
         cJSON_Delete(json);
     }
     else
     {
-        ESP_LOGE(TAG, "check_steam_topology failed");
+        ESP_LOGE(TAG, "tvmux_steam_is_open failed");
     }
     return open;
 }
@@ -558,7 +558,7 @@ void tvmux_steam_state_task(void* param)
         };
     }
 
-    if (tvmux_call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return tvmux_steam_state(desired_state) == desired_state; }, 2000, 5000))
+    if (tvmux_call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return tvmux_steam_state(desired_state) == desired_state; }))
     {
         ESP_LOGI(TAG, "set_steam_state = %u succeeded\n", desired_state);
     }

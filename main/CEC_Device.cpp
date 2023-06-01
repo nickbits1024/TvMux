@@ -52,7 +52,7 @@ void CEC_Device::Initialize(int physicalAddress, CEC_DEVICE_TYPE type, bool prom
 /// acknowledgements and arbitration
 ///
 
-void CEC_Device::Run()
+bool CEC_Device::Run()
 {
 	bool currentLineState = LineState();
 	int64_t time = esp_timer_get_time();
@@ -61,7 +61,7 @@ void CEC_Device::Run()
 		(_waitTime == (unsigned int)-1 || _waitTime > difftime))
 		// No line transition and wait for external event, or wait time not elapsed; nothing to do
 		// In IDLE state we need to check for pending transmit, though
-		return;
+		return _state != CEC_IDLE && _state != CEC_XMIT_WAIT;
 
 	if (currentLineState != _lastLineState &&
 		_state >= CEC_XMIT_WAIT && _state != CEC_XMIT_ACK_TEST && _state != CEC_XMIT_ACK_WAIT)
@@ -367,6 +367,8 @@ void CEC_Device::Run()
 			break;
 	}
 	_lastLineState = LineState();
+
+	return _state != CEC_IDLE && _state != CEC_XMIT_WAIT;
 }
 
 bool CEC_Device::Transmit(int sourceAddress, int targetAddress, const unsigned char* buffer, unsigned int count)

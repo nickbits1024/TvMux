@@ -3,10 +3,10 @@
 
 #define HDMI_HOTPLUG_GPIO_NUM           (GPIO_NUM_13)
 #define HDMI_HOTPLUG_GPIO_SEL           (1ull << HDMI_HOTPLUG_GPIO_NUM)
-#define CEC_GPIO_INPUT_NUM              (GPIO_NUM_5)
-#define CEC_GPIO_INPUT_SEL              (1ull << CEC_GPIO_INPUT_NUM)
-#define CEC_GPIO_OUTPUT_NUM             (GPIO_NUM_17)
-#define CEC_GPIO_OUTPUT_SEL             (1ull << CEC_GPIO_OUTPUT_NUM)
+#define HDMI_CEC_GPIO_NUM               (GPIO_NUM_5)
+#define HDMI_CEC_GPIO_SEL               (1ull << HDMI_CEC_GPIO_NUM)
+#define HDMI_CEC_GPIO_2_NUM             (GPIO_NUM_17)
+#define HDMI_CEC_GPIO_2_SEL             (1ull << HDMI_CEC_GPIO_2_NUM)
 #define CEC_DEVICE_TYPE                 CEC_Device::CDT_TUNER
 #define CEC_MAX_LOG_ENTRIES             256
 

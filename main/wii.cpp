@@ -991,7 +991,7 @@ void wii_state_set(wii_state_t state)
             switch (state)
             {
             case WII_PAIRING:
-                led_set_rgb_color(0, 0, 255);
+                led_set_rgb_color(255, 255, 255);
                 new_color = true;
                 break;
             case WII_PAIRING_PENDING:

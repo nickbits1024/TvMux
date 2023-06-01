@@ -35,23 +35,24 @@ esp_err_t cec_init()
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    io_conf.pin_bit_mask = CEC_GPIO_INPUT_SEL;
-    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = HDMI_CEC_GPIO_SEL;
+    io_conf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type = GPIO_INTR_DISABLE;
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    io_conf.pin_bit_mask = CEC_GPIO_OUTPUT_SEL;
-    io_conf.mode = GPIO_MODE_OUTPUT_OD;
+    io_conf.pin_bit_mask = HDMI_CEC_GPIO_2_SEL;
+    io_conf.mode = GPIO_MODE_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type = GPIO_INTR_DISABLE;
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    ESP_ERROR_CHECK(gpio_set_level(CEC_GPIO_OUTPUT_NUM, 1));
+    ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_NUM, 1));
+    //ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_2_NUM, 1));
 
 #ifdef HDMI_CEC
     xTaskCreate(cec_loop, "cec_loop", 10000, NULL, 1, NULL);
@@ -84,13 +85,13 @@ HomeTvCec::HomeTvCec() :
 
 bool HomeTvCec::LineState()
 {
-    int state = gpio_get_level(CEC_GPIO_INPUT_NUM);
+    int state = gpio_get_level(HDMI_CEC_GPIO_NUM);
     return state != 0;
 }
 
 void HomeTvCec::SetLineState(bool state)
 {
-    gpio_set_level(CEC_GPIO_OUTPUT_NUM, state ? 1 : 0);
+    gpio_set_level(HDMI_CEC_GPIO_NUM, state ? 1 : 0);
     // give enough time for the line to settle before sampling it
     ets_delay_us(50);
 }
@@ -266,12 +267,12 @@ void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, in
     msg->size = count;
     memcpy(msg->data, buffer, count);
 
-    // printf("queue ");
-    // for (int i = 0; i < msg->size; i++)
-    // {
-    //   printf("%s%02x", i != 0 ? ":" : "", msg->data[i]);
-    // }
-    // printf("\n");
+    printf("cec qx: ");
+    for (int i = 0; i < msg->size; i++)
+    {
+      printf("%s%02x", i != 0 ? ":" : "", msg->data[i]);
+    }
+    printf("\n");
 
     xQueueSend(this->queue_handle, &msg, portMAX_DELAY);
 }
@@ -331,7 +332,7 @@ bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_
     return success;
 }
 
-void HomeTvCec::Run()
+bool HomeTvCec::Run()
 {
     if (this->pending_message == NULL)
     {
@@ -365,7 +366,7 @@ void HomeTvCec::Run()
         }
     }
 
-    CEC_Device::Run();
+    return CEC_Device::Run();
 }
 
 void HomeTvCec::ClearPending()
@@ -523,6 +524,10 @@ void cec_loop(void* param)
         
         cec_device->Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
 
+        cec_device->LoadPowerState(CEC_TV_ADDRESS);
+        cec_device->LoadPowerState(CEC_AUDIO_SYSTEM_ADDRESS);
+        cec_device->LoadPowerState(CEC_PLAYBACK_DEVICE_1_ADDRESS);
+
         for (;;)
         {
             // FIXME
@@ -532,7 +537,8 @@ void cec_loop(void* param)
             //     break;
             // }
 
-            cec_device->Run();
+            while (cec_device->Run());
+
             vTaskDelay(0);
         }
 
@@ -709,7 +715,7 @@ void cec_tv_state_task(void* param)
                 return state == desired_state;
             }
             return false;
-        ; }, 5000, 5000))
+        ; }))
     {
         ESP_LOGI(TAG, "set_tv_state = %u succeeded", desired_state);
     }
@@ -770,7 +776,7 @@ void wii_state_task(void* param)
             bool state;
             return wii_query_power_state() == desired_wii_state &&
                 cec_combine_devices_state(&state, desired_av_state, true, true, false) == ESP_OK && state == desired_av_state; 
-        }, 5000, 5000))
+        }))
     {
         ESP_LOGI(TAG, "set_wii_state = %u succeeded", desired_state);
     }
@@ -819,7 +825,7 @@ esp_err_t cec_control(int target_address, const uint8_t* request, int request_si
     return ESP_OK;
 }
 
-esp_err_t cec_as_set(uint8_t addr)
+esp_err_t cec_as_set(uint16_t addr)
 {
     if (cec_device != NULL)
     {
@@ -829,7 +835,7 @@ esp_err_t cec_as_set(uint8_t addr)
     return ESP_OK;
 }
 
-esp_err_t cec_sam_request(uint8_t addr)
+esp_err_t cec_sam_request(uint16_t addr)
 {
     if (cec_device != NULL)
     {
@@ -902,7 +908,7 @@ bool cec_edid_parse(unsigned char* edid)
       uint8_t a1 = (physicalAddress >> 8) & 0xf;
       uint8_t a2 = (physicalAddress >> 4) & 0xf;
       uint8_t a3 = physicalAddress & 0xf;
-      ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
+      ESP_LOGI(TAG, "cPhysical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
 
       return true;*/
 }

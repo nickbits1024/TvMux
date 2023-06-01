@@ -95,7 +95,7 @@ protected:
 public:
     HomeTvCec();
 
-    void Run();
+    bool Run();
 
     bool Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size);
 
@@ -128,8 +128,8 @@ esp_err_t cec_wii_power(bool power_on);
 esp_err_t cec_log_write(httpd_req_t* request);
 esp_err_t cec_log_clear();
 esp_err_t cec_control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size);
-esp_err_t cec_sam_request(uint8_t addr);
-esp_err_t cec_as_set(uint8_t addr);
+esp_err_t cec_sam_request(uint16_t addr);
+esp_err_t cec_as_set(uint16_t addr);
 esp_err_t cec_tv_on();
 
 #ifdef __cplusplus

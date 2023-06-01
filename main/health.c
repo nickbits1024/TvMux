@@ -175,7 +175,7 @@ static void health_ping_end(esp_ping_handle_t hdl, void *args)
     esp_ping_get_profile(hdl, ESP_PING_PROF_REQUEST, &transmitted, sizeof(transmitted));
     esp_ping_get_profile(hdl, ESP_PING_PROF_REPLY, &received, sizeof(received));
     esp_ping_get_profile(hdl, ESP_PING_PROF_DURATION, &total_time_ms, sizeof(total_time_ms));
-    ESP_LOGI(TAG, "Ping ended transmitted=%lu received=%lu time=%lums\n", transmitted, received, total_time_ms);
+    ESP_LOGI(TAG, "Ping ended transmitted=%lu received=%lu time=%lums", transmitted, received, total_time_ms);
 
     ESP_ERROR_CHECK(esp_ping_start(health_ping_handle));
 }

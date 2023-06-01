@@ -9,6 +9,10 @@
 #define TVMUX_STEAM_PING_COUNT          (2)
 #define TVMUX_STEAM_PING_INTERVAL       (500)
 
+#define TVMUX_RETRY_MAX                 (3)
+#define TVMUX_RETRY_WAIT_MS             (10000)
+#define TVMUX_RETRY_CHECK_WAIT_MS       (10000)
+
 #define HTTP_SUCCESS(http_code)         ((http_code) >= 200 && (http_code) <= 299)
 
 uint8_t readI2CByte(uint8_t data_addr);

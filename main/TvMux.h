@@ -11,8 +11,6 @@ extern "C"
 {
 #endif
 
-#define TVMUX_MAX_COMMAND_RETRY          3
-
 // #ifdef __cplusplus
 // extern "C" nvs_handle config_nvs_handle;
 // #else
@@ -39,7 +37,7 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
 esp_err_t tvmux_tv_power(bool power_on);
 
 #ifdef __cplusplus
-bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check, int check_wait_ms, int retry_wait_ms);
+bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check);
 
 
 }
