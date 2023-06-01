@@ -16,7 +16,7 @@ enum CEC_POWER_STATE
     CEC_POWER_OFF = 0x01,
     CEC_POWER_TRANS_ON = 0x02,
     CEC_POWER_TRANS_OFF = 0x03,
-    INVALID_POWER_STATE = 0xff
+    CEC_POWER_UNKNOWN = 0xff
 };
 
 // CEC locical address handling
@@ -109,7 +109,7 @@ public:
     void WriteLog(httpd_req_t* request);
     void ClearLog();
     CEC_POWER_STATE GetPowerState(uint8_t addr);
-    void LoadPowerState(uint8_t addr);
+    CEC_POWER_STATE LoadPowerState(uint8_t addr);
 };
 
 #endif

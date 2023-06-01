@@ -69,10 +69,10 @@ HomeTvCec::HomeTvCec() :
     reply_size(NULL),
     reply_address(-1),
     active_source(-1),
-    power_states { CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, 
-                   CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, 
-                   CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, 
-                   CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF, CEC_POWER_OFF }
+    power_states { CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, 
+                   CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, 
+                   CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, 
+                   CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN, CEC_POWER_UNKNOWN }
 {
     this->queue_handle = xQueueCreate(100, sizeof(CEC_MESSAGE*));
     request_sem = xSemaphoreCreateBinary();
@@ -180,7 +180,7 @@ void HomeTvCec::OnReceiveComplete(unsigned char* buffer, int size, bool ack)
             portENTER_CRITICAL(&state_mux);    
             this->power_states[source_addr] = buffer[2];
             portEXIT_CRITICAL(&state_mux);
-            ets_printf("addr 0x%02x power state = %u\n", source_addr, buffer[2]);
+            ESP_LOGI(TAG, "addr 0x%02x got power state %d", source_addr, buffer[2]);
             break;
     }
 
@@ -460,23 +460,33 @@ CEC_POWER_STATE HomeTvCec::GetPowerState(uint8_t addr)
 {
     if (addr > CEC_MAX_ADDRESS)
     {
-        return INVALID_POWER_STATE;
+        return CEC_POWER_UNKNOWN;
     }
     
     portENTER_CRITICAL(&this->state_mux);
     uint8_t power_state = this->power_states[addr];
     portEXIT_CRITICAL(&this->state_mux);
 
+    if (power_state == CEC_POWER_UNKNOWN)
+    {
+        return LoadPowerState(addr);
+    }
+
     return (CEC_POWER_STATE)power_state;
 }
 
-void HomeTvCec::LoadPowerState(uint8_t addr)
+CEC_POWER_STATE HomeTvCec::LoadPowerState(uint8_t addr)
 {
     uint8_t reply[CEC_MAX_MSG_SIZE];
     uint8_t cmd[] = { 0x8f };
     int reply_size = CEC_MAX_MSG_SIZE;
     
-    Control(addr, cmd, sizeof(cmd), CEC_POWER_STATUS, reply, &reply_size);
+    if (Control(addr, cmd, sizeof(cmd), CEC_POWER_STATUS, reply, &reply_size) && reply_size ==3)
+    {
+        ESP_LOGI(TAG, "addr 0x%02x loaded power state %d", addr, reply[2]);
+        return (CEC_POWER_STATE)reply[2];
+    }
+    return CEC_POWER_UNKNOWN;
 }
 
 void cec_loop(void* param)
@@ -524,10 +534,6 @@ void cec_loop(void* param)
         
         cec_device->Initialize(cec_physical_address, CEC_DEVICE_TYPE, true); // Promiscuous mode}
 
-        cec_device->LoadPowerState(CEC_TV_ADDRESS);
-        cec_device->LoadPowerState(CEC_AUDIO_SYSTEM_ADDRESS);
-        cec_device->LoadPowerState(CEC_PLAYBACK_DEVICE_1_ADDRESS);
-
         for (;;)
         {
             // FIXME
@@ -537,9 +543,18 @@ void cec_loop(void* param)
             //     break;
             // }
 
-            while (cec_device->Run());
+            int busy = 0;
 
-            vTaskDelay(0);
+            while (cec_device->Run())
+            {
+                busy++;
+            }
+            if (busy > 0)
+            {
+                ESP_LOGI(TAG, "cec busy for %d iterations", busy);
+            }
+
+            taskYIELD();
         }
 
         delete cec_device;
@@ -908,7 +923,7 @@ bool cec_edid_parse(unsigned char* edid)
       uint8_t a1 = (physicalAddress >> 8) & 0xf;
       uint8_t a2 = (physicalAddress >> 4) & 0xf;
       uint8_t a3 = physicalAddress & 0xf;
-      ESP_LOGI(TAG, "cPhysical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
+      ESP_LOGI(TAG, "cPhysical Address: %u.%u.%u.%u", a0, a1, a2, a3);
 
       return true;*/
 }
@@ -926,7 +941,7 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
         return false;
     }
 
-    //ESP_LOGI(TAG, "EDID ext checksum: %08x\n", sum);
+    //ESP_LOGI(TAG, "EDID ext checksum: %08x", sum);
 
     uint8_t tag = ext[0];
     //uint8_t revision = ext[1];
