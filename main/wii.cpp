@@ -110,7 +110,7 @@ void pairing_task(void* p)
 
         wii_state_set(WII_PAIRING_PENDING);
 
-        led_push_rgb_color(255, 255, 0);
+        led_push_rgb_color(255, 255, 255);
 
         while (gpio_get_level(WII_PAIR_GPIO_NUM) == 0) {
             vTaskDelay(500 / portTICK_PERIOD_MS);
@@ -991,7 +991,7 @@ void wii_state_set(wii_state_t state)
             switch (state)
             {
             case WII_PAIRING:
-                led_set_rgb_color(255, 255, 255);
+                led_set_rgb_color(0, 0, 255);
                 new_color = true;
                 break;
             case WII_PAIRING_PENDING:
