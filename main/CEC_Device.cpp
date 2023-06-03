@@ -1,6 +1,9 @@
 #include "freertos/FreeRTOS.h"
 #include "esp_timer.h"
+#include "esp_log.h"
 #include "CEC_Device.h"
+
+#define TAG "cec"
 
 CEC_Device::CEC_Device() :
 	_promiscuous(false),
@@ -89,9 +92,13 @@ bool CEC_Device::Run()
 			else if (_transmitBufferBytes)
 			{
 				// Transmit pending
-				if (_xmitretry > CEC_MAX_RETRANSMIT)
+				if (_xmitretry > CEC_MAX_RETRANSMIT) 
+				{
+					ESP_LOGE(TAG, "failed to send %d bytes", _transmitBufferBytes);
+					PrintIO('c', _transmitBuffer, _transmitBufferBytes, true);
 					// No more
-					_transmitBufferBytes = 0;
+					_transmitBufferBytes = 0;					
+				}
 				else
 				{
 					// We need to wait a certain amount of time before we can transmit
@@ -250,6 +257,13 @@ bool CEC_Device::Run()
 			break;
 
 		case CEC_XMIT_WAIT:
+			// if (!currentLineState)
+			// {
+			// 	ESP_LOGE(TAG, "tx while busy??");
+			// 	_bitStartTime = time;
+			// 	break;
+			// }
+
 			// We waited long enough, begin start bit
 			SetLineState(0);
 			_bitStartTime = time;

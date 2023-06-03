@@ -1,3 +1,7 @@
+#include <list>
+#include <iomanip>
+#include <string>
+#include <sstream>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -5,13 +9,10 @@
 #include "esp_log.h"
 #include "rom/ets_sys.h"
 #include "driver/gpio.h"
-#include <list>
-#include <iomanip>
-#include <string>
-#include <sstream>
-#include <nvs_flash.h>
-#include <esp_log.h>
-#include <esp_http_server.h>
+#include "nvs_flash.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_http_server.h"
 #include "ddc.h"
 #include "cec.h"
 #include "cec_int.h"
@@ -279,6 +280,12 @@ void HomeTvCec::TransmitFrame(int targetAddress, const unsigned char* buffer, in
 
 bool HomeTvCec::Control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size)
 {
+    if (LogicalAddress() == -1)
+    {
+        ESP_LOGE(TAG, "cec address not set");
+        return false;
+    }
+
     if ((reply == NULL && reply_size != NULL) || (reply_size != NULL && *reply_size < CEC_MAX_MSG_SIZE))
     {
         return false;
@@ -500,7 +507,7 @@ void cec_loop(void* param)
         //     vTaskDelay(50 / portTICK_PERIOD_MS);
         // }
 
-        ESP_LOGI(TAG, "Hotplug signal detected!\n");
+        ESP_LOGI(TAG, "Hotplug signal detected!");
 
         uint8_t edid[DDC_EDID_LENGTH];
         uint8_t edid_extension[DDC_EDID_EXTENSION_LENGTH];
@@ -545,14 +552,18 @@ void cec_loop(void* param)
 
             int busy = 0;
 
+            int64_t start_time = esp_timer_get_time();
+
             while (cec_device->Run())
             {
                 busy++;
             }
-            if (busy > 0)
-            {
-                ESP_LOGI(TAG, "cec busy for %d iterations", busy);
-            }
+            // int64_t busy_ms = (esp_timer_get_time() - start_time) / 1000;
+
+            // if (busy > 0)
+            // {
+            //     ESP_LOGI(TAG, "cec busy for %d iterations / %lld ms", busy, busy_ms);
+            // }
 
             taskYIELD();
         }
@@ -881,8 +892,8 @@ bool cec_edid_parse(unsigned char* edid)
         sum += (uint32_t)edid[i];
     }
 
-    //ESP_LOGI(TAG, "EDID checksum: %08lx\n", sum);
-    //ESP_LOGI(TAG, "EDID header: %08lx%08lx\n", header0, header1);
+    //ESP_LOGI(TAG, "EDID checksum: %08lx", sum);
+    //ESP_LOGI(TAG, "EDID header: %08lx%08lx", header0, header1);
 
     if (header0 != 0x00ffffff || header1 != 0xffffff00)
     {
@@ -908,7 +919,7 @@ bool cec_edid_parse(unsigned char* edid)
 
     ESP_LOGI(TAG, "EDID version: %u.%u", version, revision);
     ESP_LOGI(TAG, "EDID manufacturer: %s", manufacturer);
-    //ESP_LOGI(TAG, "EDID extension_flag: %d\n", extension_flag);
+    //ESP_LOGI(TAG, "EDID extension_flag: %d", extension_flag);
 
     return true;
     /*
@@ -918,7 +929,7 @@ bool cec_edid_parse(unsigned char* edid)
       uint8_t ieee2 = edid[0x97];
       uint16_t physicalAddress = edid[0x98] << 8 | edid[0x99];
 
-      ESP_LOGI(TAG, "IEEE ID: %02x%02x%02x\n", ieee0, ieee1, ieee2);
+      ESP_LOGI(TAG, "IEEE ID: %02x%02x%02x", ieee0, ieee1, ieee2);
       uint8_t a0 = physicalAddress >> 12;
       uint8_t a1 = (physicalAddress >> 8) & 0xf;
       uint8_t a2 = (physicalAddress >> 4) & 0xf;
@@ -948,9 +959,9 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
     uint8_t dtd_offset = ext[2];
     uint8_t offset = 4;
 
-    // ESP_LOGI(TAG, "EDID ext tag: %u\n", tag);
-    // ESP_LOGI(TAG, "EDID ext revision: %u\n", revision);
-    // ESP_LOGI(TAG, "EDID ext dtd_offset: %u\n", dtd_offset);
+    // ESP_LOGI(TAG, "EDID ext tag: %u", tag);
+    // ESP_LOGI(TAG, "EDID ext revision: %u", revision);
+    // ESP_LOGI(TAG, "EDID ext dtd_offset: %u", dtd_offset);
 
     if (tag != 2)
     {
@@ -971,7 +982,7 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
         uint8_t tag = p[0] >> 5;
         uint8_t length = p[0] & 0x1f;
 
-        //ESP_LOGI(TAG, "EDID ext tag: %d length: %d\n", tag, length);
+        //ESP_LOGI(TAG, "EDID ext tag: %d length: %d", tag, length);
 
         switch (tag)
         {
@@ -981,7 +992,7 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
                 ieee[0] = p[3];
                 ieee[1] = p[2];
                 ieee[2] = p[1];
-                //ESP_LOGI(TAG, "EDID IEEE %02x %02x %02x\n", ieee[0], ieee[1], ieee[2]);
+                //ESP_LOGI(TAG, "EDID IEEE %02x %02x %02x", ieee[0], ieee[1], ieee[2]);
                 if (ieee[0] == 0x00 && ieee[1] == 0x0c && ieee[2] == 0x03)
                 {
                     cec_physical_address = (uint16_t)p[4] << 8 | p[5];
@@ -990,7 +1001,7 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
                     uint8_t a2 = (cec_physical_address >> 4) & 0xf;
                     uint8_t a3 = cec_physical_address & 0xf;
 
-                    ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u\n", a0, a1, a2, a3);
+                    ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u", a0, a1, a2, a3);
 
                 }
                 break;

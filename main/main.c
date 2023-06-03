@@ -26,6 +26,9 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "app_main()");
 
+    ESP_ERROR_CHECK(led_init());
+    led_set_rgb_color(0, 255, 0);
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -46,7 +49,6 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&spiffs));
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(webserver_init());
-    ESP_ERROR_CHECK(led_init());
     ESP_ERROR_CHECK(ddc_init());
     ESP_ERROR_CHECK(cec_init());
     ESP_ERROR_CHECK(tvmux_init(&setup_enabled));
@@ -61,33 +63,6 @@ void app_main(void)
         ESP_ERROR_CHECK(wii_init());
     }
 
-    led_set_rgb_color(0, 128, 0);
-
-    // vTaskDelay(15000 / portTICK_PERIOD_MS);
-    // ESP_LOGI(TAG, "get_json start");    
-
-    // const int size = 20000;
-    // char* s = malloc(size);
-
-    // cJSON* json = get_json("http://bed.home.nickpalmer.net/bed");
-    // if (json != NULL)
-    // {
-    //     if (cJSON_PrintPreallocated(json, s, size, true))
-    //     {
-    //         printf("json: %s\n", s);
-    //     }
-
-    //     cJSON_Delete(json);
-    // }
-    // json = get_json("http://seattle.home.nickpalmer.net:53675/JSON.aspx");
-    // if (json != NULL)
-    // {
-    //     if (cJSON_PrintPreallocated(json, s, size, true))
-    //     {
-    //         printf("json: %s\n", s);
-    //     }
-
-    //     cJSON_Delete(json);
-    // }
-
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    led_set_rgb_color(0, 1, 0);
 }

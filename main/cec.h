@@ -90,7 +90,7 @@ protected:
     virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
     void TransmitFrame(int targetAddress, const uint8_t* buffer, int count);
     //void TransmitFrame(int fromAddress, int targetAddress, const unsigned char* buffer, int count);
-    void PrintIO(char direction, unsigned char* buffer, int size, bool ack);
+    virtual void PrintIO(char direction, unsigned char* buffer, int size, bool ack);
 
 public:
     HomeTvCec();

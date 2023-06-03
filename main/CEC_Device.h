@@ -26,6 +26,7 @@ protected:
 	virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack) = 0;
 	virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack) = 0;
 	virtual void OnReady(int logicalAddress) = 0;
+	virtual void PrintIO(char direction, unsigned char* buffer, int size, bool ack) = 0;
 
 private:
 	bool Transmit(int sourceAddress, int targetAddress, const unsigned char* buffer, unsigned int count);

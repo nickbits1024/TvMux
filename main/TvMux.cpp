@@ -464,6 +464,7 @@ esp_err_t tvmux_cec_log_write(httpd_req_t* request)
 
 esp_err_t tvmux_cec_log_clear()
 {
+    cec_log_clear();
 
     return ESP_OK;
 }

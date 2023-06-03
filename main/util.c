@@ -32,7 +32,7 @@ void format_bytes(char* s, int n, const unsigned char* buffer, int count)
 
 static void ping_success(esp_ping_handle_t hdl, void* args)
 {
-    ESP_LOGI(TAG, "ping_success");   
+    //ESP_LOGI(TAG, "ping_success");   
 
     int* pongs = (int*)args;
 
@@ -41,12 +41,12 @@ static void ping_success(esp_ping_handle_t hdl, void* args)
 
 static void ping_timeout(esp_ping_handle_t hdl, void* args)
 {
-    ESP_LOGI(TAG, "ping_timeout");
+    //ESP_LOGI(TAG, "ping_timeout");
 }
 
 static void ping_end(esp_ping_handle_t hdl, void* args)
 {
-    ESP_LOGI(TAG, "ping_end");
+    //ESP_LOGI(TAG, "ping_end");
 }
 
 typedef struct
@@ -120,7 +120,7 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
 
     vTaskDelay((ping_config.count * ping_config.interval_ms + 500) / portTICK_PERIOD_MS);
 
-    ESP_LOGI(TAG, "ping " IPSTR " pong %d", IP2STR(&addr), *pongs);
+    ESP_LOGI(TAG, "ping " IPSTR " tx %d rx %d", IP2STR(&addr), count, *pongs);
 
 cleanup:
     vSemaphoreDelete(sem);
