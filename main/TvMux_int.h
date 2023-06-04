@@ -22,5 +22,3 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext);
 bool tvmux_steam_is_on();
 bool tvmux_steam_is_open();
 void tvmux_steam_state_task(void* param);
-
-void tvmux_hdmi_task(void* param);

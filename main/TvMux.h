@@ -23,7 +23,10 @@ typedef enum
     TV_RETRY_FUNC,
     STEAM_RETRY_FUNC,
     WII_RETRY_FUNC
-} retry_function_t;
+} tvmux_retry_type_t;
+
+typedef void (*tvmux_retry_func_t)(void* param);
+typedef bool (*tvmux_retry_check_func_t)(void* param);
 
 esp_err_t tvmux_init(bool* setup_enabled);
 esp_err_t tvmux_steam_power(bool power_on);
@@ -37,7 +40,7 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
 esp_err_t tvmux_tv_power(bool power_on);
 
 #ifdef __cplusplus
-bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check);
+bool tvmux_call_with_retry(tvmux_retry_type_t retry_type, tvmux_retry_func_t f, tvmux_retry_check_func_t check, void* retry_param);
 
 
 }

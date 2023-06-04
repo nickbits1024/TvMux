@@ -701,47 +701,46 @@ esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool au
     return ESP_OK;
 }
 
+void cec_tv_state_set(void* retry_param)
+{
+    bool desired_state = (bool)retry_param;
+
+    if (desired_state)
+    {
+        if (cec_device != NULL)
+        {
+            uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_ATV_HDMI_INPUT << 8;
+            cec_device->SetActiveSource(addr);
+            cec_device->TvScreenOn();
+            cec_device->SystemAudioModeRequest(addr);
+            cec_device->UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
+        }
+
+    }
+    else
+    {
+        if (cec_device != NULL)
+        {
+            cec_device->StandBy(); 
+        }
+    }
+}
+
+bool cec_tv_state_check(void* retry_param)
+{
+    bool desired_state = (bool)retry_param;
+
+    bool state;
+    return cec_combine_devices_state(&state, desired_state) == ESP_OK && state == desired_state;
+}
+
 void cec_tv_state_task(void* param)
 {
     bool desired_state = (bool)param;
 
     ESP_LOGI(TAG, "set_tv_state = %u requested", desired_state);
 
-    void (*change_state)() = NULL;
-
-    if (desired_state)
-    {
-        change_state = [] {
-            if (cec_device != NULL)
-            {
-                uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_ATV_HDMI_INPUT << 8;
-                cec_device->SetActiveSource(addr);
-                cec_device->TvScreenOn();
-                cec_device->SystemAudioModeRequest(addr);
-                cec_device->UserControlPressed(CEC_PLAYBACK_DEVICE_1_ADDRESS, CEC_USER_CONTROL_POWER_ON);
-            }
-        };
-    }
-    else
-    {
-        change_state = [] 
-        { 
-            if (cec_device != NULL)
-            {
-                cec_device->StandBy(); 
-            }
-        };
-    }
-
-    if (tvmux_call_with_retry(TV_RETRY_FUNC, change_state, [desired_state] 
-        { 
-            bool state;
-            if (cec_combine_devices_state(&state, desired_state) == ESP_OK)
-            {
-                return state == desired_state;
-            }
-            return false;
-        ; }))
+    if (tvmux_call_with_retry(TV_RETRY_FUNC, cec_tv_state_set, cec_tv_state_check, (void*)desired_state))
     {
         ESP_LOGI(TAG, "set_tv_state = %u succeeded", desired_state);
     }
@@ -760,6 +759,39 @@ esp_err_t cec_tv_power(bool power_on)
     return ESP_OK;
 }
 
+void wii_state_set(void* retry_param)
+{
+    bool desired_state = (bool)param;
+
+    if (desired_state)
+    {
+        auto status = wii_power_on();
+        uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_WII_HDMI_INPUT << 8;
+        if (cec_device != NULL)
+        {
+            cec_device->SetActiveSource(addr);
+            cec_device->TvScreenOn();
+            cec_device->SystemAudioModeRequest(addr);
+        }
+    }
+    else
+    {
+        auto status = wii_power_off();
+        if (cec_device != NULL)
+        {
+            cec_device->StandBy();
+        }
+    }
+}
+
+bool wii_state_check(void* retry_param)
+{
+    bool desired_state = (bool)param;
+
+    bool state;
+    return wii_query_power_state() == desired_wii_state &&
+        cec_combine_devices_state(&state, desired_av_state, true, true, false) == ESP_OK && state == desired_av_state;
+}
 
 void wii_state_task(void* param)
 {
@@ -769,40 +801,9 @@ void wii_state_task(void* param)
     bool desired_av_state = desired_state;
     wii_power_state_t desired_wii_state = desired_av_state ? WII_POWER_STATE_ON : WII_POWER_STATE_OFF;
 
-        ESP_LOGI(TAG, "set_wii_state = %u requested", desired_state);
+    ESP_LOGI(TAG, "set_wii_state = %u requested", desired_state);
 
-    if (desired_state)
-    {
-        change_state = [] {
-            auto status = wii_power_on();
-            uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_WII_HDMI_INPUT << 8;
-            if (cec_device != NULL)
-            {
-                cec_device->SetActiveSource(addr);
-                cec_device->TvScreenOn();
-                cec_device->SystemAudioModeRequest(addr);
-            }
-            return status;
-        };
-    }
-    else
-    {
-        change_state = [] {
-            auto status = wii_power_off();
-            if (cec_device != NULL)
-            {
-                cec_device->StandBy();
-            }
-            return status;
-        };
-    }
-
-    if (tvmux_call_with_retry(WII_RETRY_FUNC, change_state, [desired_av_state, desired_wii_state]
-        { 
-            bool state;
-            return wii_query_power_state() == desired_wii_state &&
-                cec_combine_devices_state(&state, desired_av_state, true, true, false) == ESP_OK && state == desired_av_state; 
-        }))
+    if (tvmux_call_with_retry(WII_RETRY_FUNC, wii_state_set, wii_stae_check, (void*)desired_state))
     {
         ESP_LOGI(TAG, "set_wii_state = %u succeeded", desired_state);
     }

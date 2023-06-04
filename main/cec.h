@@ -50,10 +50,6 @@ typedef struct
     uint8_t data[CEC_MAX_MSG_SIZE];
 } CEC_LOG_ENTRY;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 esp_err_t cec_init();
 esp_err_t cec_queue_clear();
 esp_err_t cec_standby();
@@ -69,10 +65,5 @@ esp_err_t cec_as_set(uint16_t addr);
 esp_err_t cec_tv_on();
 
 esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv);
-
-#ifdef __cplusplus
-}
-#endif
-
 
 #endif

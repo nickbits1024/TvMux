@@ -30,20 +30,10 @@ typedef enum
     WII_QUERY_POWER_STATE
 } wii_state_t;
 
-#ifdef __cplusplus
-extern "C" 
-{
-#endif
-
 esp_err_t wii_init();
 wii_power_state_t wii_query_power_state();
 wii_power_status_t wii_power_on();
 wii_power_status_t wii_power_off();
 //void wii_pair();
-
-#ifdef __cplusplus
-}
-#endif
-
 
 #endif

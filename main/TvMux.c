@@ -1,5 +1,3 @@
-#include <atomic>
-#include <functional>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -19,17 +17,13 @@
 
 #define TAG "TVMUX"
 
-uint16_t cec_physical_address;
-//nvs_handle config_nvs_handle;
-httpd_handle_t http_server_handle;
-//WiFiUDP UDP;
-//WakeOnLan WOL(UDP);
-bool device_state[CEC_MAX_ADDRESS + 1];
-SemaphoreHandle_t retry_sem;
-std::atomic_bool steam_on_pending;
-std::atomic_bool tv_on_pending;
-std::atomic_bool wii_on_pending;
-std::atomic<retry_function_t> retry_function;
+bool tvmux_device_state[CEC_MAX_ADDRESS + 1];
+SemaphoreHandle_t tvmux_retry_sem;
+portMUX_TYPE tvmux_mux = portMUX_INITIALIZER_UNLOCKED;
+bool tvmux_steam_on_pending;
+bool tvmux_tv_on_pending;
+bool tvmux_wii_on_pending;
+tvmux_retry_type_t tvmux_active_retry_func;
 
 esp_err_t tvmux_init(bool* setup_enabled)
 {
@@ -50,26 +44,28 @@ esp_err_t tvmux_init(bool* setup_enabled)
 
     *setup_enabled = gpio_get_level(TVMUX_SETUP_GPIO_NUM) == TVMUX_SETUP_ENABLED;
 
-    retry_sem = xSemaphoreCreateBinary();
-    xSemaphoreGive(retry_sem);    
+    tvmux_retry_sem = xSemaphoreCreateBinary();
+    xSemaphoreGive(tvmux_retry_sem);    
 
     return ESP_OK;
 }
 
-bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::function<bool()> check)
+bool tvmux_call_with_retry(tvmux_retry_type_t retry_type, tvmux_retry_func_t f, tvmux_retry_check_func_t check, void* retry_param)
 {
     int retry = 0;
     bool success;
 
-    if (xSemaphoreTake(retry_sem, 0) != pdTRUE)
+    if (xSemaphoreTake(tvmux_retry_sem, 0) != pdTRUE)
     {
-        ESP_LOGE(TAG, "Retry already in progress.  Function %u cancelled.", func);
+        ESP_LOGE(TAG, "Retry already in progress.  Function %u cancelled.", retry_type);
         return false;
     }
 
     led_push_rgb_color(0, 0, 255);
 
-    retry_function = func;
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_active_retry_func = retry_type;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
     do
     {
@@ -78,37 +74,37 @@ bool tvmux_call_with_retry(retry_function_t func, std::function<void()> f, std::
             ESP_LOGE(TAG, "Control retry #%d in %dms", retry, TVMUX_RETRY_CHECK_WAIT_MS);
             vTaskDelay(TVMUX_RETRY_WAIT_MS / portTICK_PERIOD_MS);
         }
-        f();
+        f(retry_param);
         vTaskDelay(TVMUX_RETRY_CHECK_WAIT_MS / portTICK_PERIOD_MS);
-        success = check();
+        success = check(retry_param);
         //cec_queue_clear();
     } while (retry++ < TVMUX_RETRY_MAX && !success);
 
-    xSemaphoreGive(retry_sem);
+    xSemaphoreGive(tvmux_retry_sem);
 
     led_pop_rgb_color();
 
-    retry_function = NO_RETRY_FUNC;
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_active_retry_func = NO_RETRY_FUNC;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
     return success;
 }
 
-bool check_retry_busy(retry_function_t func)
+bool check_retry_busy(tvmux_retry_type_t func)
 {
-    if (xSemaphoreTake(retry_sem, 0) == pdTRUE)
+    if (xSemaphoreTake(tvmux_retry_sem, 0) == pdTRUE)
     {
-        xSemaphoreGive(retry_sem);
+        xSemaphoreGive(tvmux_retry_sem);
 
         return false;        
     }
 
-    return retry_function == func;
-}
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_retry_type_t active_retry_func = tvmux_active_retry_func;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
-bool tvmux_steam_state(bool and_mode)
-{
-    bool state;
-    return tvmux_steam_state(and_mode, false, &state, NULL) == ESP_OK && state;
+    return active_retry_func == func;
 }
 
 bool tvmux_steam_power_on()
@@ -289,10 +285,10 @@ bool check_steam_topology()
     cJSON* json = tvmux_steam_get_json("/api/monitor/topology");
     if (json != NULL)
     {
-        auto topology_prop = cJSON_GetObjectItem(json, "topology");
+        cJSON* topology_prop = cJSON_GetObjectItem(json, "topology");
         if (topology_prop != NULL)
         {
-            auto topology_value = cJSON_GetStringValue(topology_prop);
+            const char* topology_value = cJSON_GetStringValue(topology_prop);
             if (topology_value != NULL)
             {
                 external = strcasecmp(topology_value, "External") == 0;
@@ -358,10 +354,10 @@ bool tvmux_steam_is_open()
     cJSON* json = tvmux_steam_get_json("/api/steam/status");
     if (json != NULL)
     {
-        auto status_prop = cJSON_GetObjectItem(json, "steamStatus");
+        cJSON* status_prop = cJSON_GetObjectItem(json, "steamStatus");
         if (status_prop != NULL)
         {
-            auto status_value = cJSON_GetStringValue(status_prop);
+            const char* status_value = cJSON_GetStringValue(status_prop);
             if (status_value != NULL)
             {
                 open = strcasecmp(status_value, "Open") == 0;
@@ -385,6 +381,10 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
 
         if (check_retry_busy(STEAM_RETRY_FUNC))
         {
+            taskENTER_CRITICAL(&tvmux_mux);
+            bool steam_on_pending = tvmux_steam_on_pending;
+            taskEXIT_CRITICAL(&tvmux_mux);
+
             ESP_LOGI(TAG, "Returning pending steam state %d", (bool)steam_on_pending);
 
             *pending = true;
@@ -439,7 +439,9 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
 
 esp_err_t tvmux_steam_power(bool power_on)
 {
-    steam_on_pending = power_on;
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_steam_on_pending = power_on;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
     xTaskCreate(tvmux_steam_state_task, "steam_state", 4000, (void*)power_on, 1, NULL);
 
@@ -448,7 +450,9 @@ esp_err_t tvmux_steam_power(bool power_on)
 
 esp_err_t tvmux_wii_power(bool power_on)
 {
-    wii_on_pending = power_on;
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_wii_on_pending = power_on;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
     cec_wii_power(power_on);
 
@@ -478,7 +482,9 @@ esp_err_t tvmux_cec_control(int target_address, const uint8_t* request, int requ
 
 esp_err_t tvmux_tv_pending_get(bool* pending)
 {
-    *pending = tv_on_pending;
+    taskENTER_CRITICAL(&tvmux_mux);
+    *pending = tvmux_tv_on_pending;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
     return ESP_OK;
 }
@@ -506,6 +512,10 @@ esp_err_t tvmux_wii_state_get(wii_power_state_t* wii_power_state, bool* pending)
 
     if (check_retry_busy(WII_RETRY_FUNC))
     {
+        taskENTER_CRITICAL(&tvmux_mux);
+        bool wii_on_pending = tvmux_wii_on_pending;
+        taskEXIT_CRITICAL(&tvmux_mux);
+
         *wii_power_state = wii_on_pending ? WII_POWER_STATE_ON : WII_POWER_STATE_OFF;
         *pending = true;
     }
@@ -517,49 +527,56 @@ esp_err_t tvmux_wii_state_get(wii_power_state_t* wii_power_state, bool* pending)
     return ESP_OK;
 }
 
+void tvmux_steam_state_set(void* retry_param)
+{
+    bool desired_state = (bool)retry_param;
+
+    if (desired_state)
+    {
+        uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_STEAM_HDMI_INPUT << 8;
+
+        cec_as_set(addr);
+        cec_sam_request(addr);
+        cec_tv_on();
+
+        ESP_LOGI(TAG, "checking steam pc...");
+        if (!tvmux_steam_is_on())
+        {
+            ESP_LOGI(TAG, "powering on steam pc...");
+            if (!tvmux_steam_power_on())
+            {
+                return;
+            }
+            //vTaskDelay(10000 / portTICK_PERIOD_MS);
+        }
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        ESP_LOGI(TAG, "opening steam...");
+        tvmux_steam_start();
+    }
+    else
+    {
+        ESP_LOGI(TAG, "turn steam off\n");
+        cec_standby();
+        tvmux_steam_close();
+        steam_power_off();
+    }
+}
+
+bool tvmux_steam_state_check(void* retry_param)
+{
+    bool desired_state = (bool)retry_param;
+
+    bool state;
+    return tvmux_steam_state(desired_state, false, &state, NULL) == ESP_OK && state == desired_state;
+}
+
 void tvmux_steam_state_task(void* param)
 {
     bool desired_state = (bool)param;
 
     ESP_LOGI(TAG, "set_steam_state = %u requested", desired_state);
 
-    void (*change_state)() = NULL;
-
-    if (desired_state)
-    {
-        change_state = [] {
-            uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_STEAM_HDMI_INPUT << 8;
-
-            cec_as_set(addr);
-            cec_sam_request(addr);
-            cec_tv_on();
-
-            ESP_LOGI(TAG, "checking steam pc...");
-            if (!tvmux_steam_is_on())
-            {
-                ESP_LOGI(TAG, "powering on steam pc...");
-                if (!tvmux_steam_power_on())
-                {
-                    return;
-                }
-                //vTaskDelay(10000 / portTICK_PERIOD_MS);
-            }
-            vTaskDelay(10000 / portTICK_PERIOD_MS);
-            ESP_LOGI(TAG, "opening steam...");
-            tvmux_steam_start();
-        };
-    }
-    else
-    {
-        change_state = [] { 
-            ESP_LOGI(TAG, "turn steam off\n");
-            cec_standby();
-            tvmux_steam_close();
-            steam_power_off();
-        };
-    }
-
-    if (tvmux_call_with_retry(STEAM_RETRY_FUNC, change_state, [desired_state] { return tvmux_steam_state(desired_state) == desired_state; }))
+    if (tvmux_call_with_retry(STEAM_RETRY_FUNC, tvmux_steam_state_set, tvmux_steam_state_check, (void*)desired_state))
     {
         ESP_LOGI(TAG, "set_steam_state = %u succeeded\n", desired_state);
     }
@@ -573,21 +590,9 @@ void tvmux_steam_state_task(void* param)
 
 esp_err_t tvmux_tv_power(bool power_on)
 {
-    tv_on_pending = power_on;
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_tv_on_pending = power_on;
+    taskEXIT_CRITICAL(&tvmux_mux);
 
     return cec_tv_power(power_on);
 }
-
-// void tvmux_hdmi_task(void* param)
-// {
-//     for (;;) 
-//     {
-//         if (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
-//         { 
-//             ESP_LOGE(TAG, "HDMI disconnected, rebooting...");
-//             esp_restart();
-//         }
-
-//         vTaskDelay(500 / portTICK_PERIOD_MS);
-//     }
-// }

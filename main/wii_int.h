@@ -48,11 +48,6 @@ extern int wii_sdp_request_responses_size;
 extern wii_request_response_t wii_hid_request_responses[];
 extern int wii_hid_request_responses_size;
 
-#ifdef __cplusplus
-extern "C" 
-{
-#endif
-
 void wii_packet_handler(uint8_t* packet, uint16_t size);
 void post_bt_packet(BT_PACKET_ENVELOPE* env);
 void wii_connect();
@@ -64,8 +59,3 @@ void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_
 //void wii_pair_irq_handler(void* arg);
 wii_state_t wii_state_get();
 void wii_state_set(wii_state_t state);
-
-
-#ifdef __cplusplus
-}
-#endif

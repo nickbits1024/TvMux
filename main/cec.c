@@ -16,6 +16,8 @@
 
 esp_err_t cec_init()
 {
+    gpio_config_t io_conf;
+
     io_conf.pin_bit_mask = HDMI_HOTPLUG_GPIO_SEL;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
