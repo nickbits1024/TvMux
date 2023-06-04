@@ -1,4 +1,5 @@
-
+#include "freertos/queue.h"
+#include "CEC_Device.h"
 
 #define HDMI_HOTPLUG_GPIO_NUM           (GPIO_NUM_13)
 #define HDMI_HOTPLUG_GPIO_SEL           (1ull << HDMI_HOTPLUG_GPIO_NUM)

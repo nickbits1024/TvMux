@@ -494,7 +494,7 @@ esp_err_t tvmux_tv_state_get(bool* tv_state, bool* pending)
     }
     else
     {
-        ESP_RETURN_ON_ERROR(cec_combine_devices_state(tv_state, false), TAG, "%s/tvmux_combine_devices_state failed (%s)", __func__, esp_err_to_name(err_rc_));
+        ESP_RETURN_ON_ERROR(cec_combine_devices_state(tv_state, false, true, true, true), TAG, "%s/tvmux_combine_devices_state failed (%s)", __func__, esp_err_to_name(err_rc_));
     }
 
     return ESP_OK;

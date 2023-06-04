@@ -1,3 +1,3 @@
-idf_component_register(SRCS "util.c" "ddc.c" "TvMux.cpp" "main.c" "wifi.c" "ble.c" "led.c" "webserver.c" "health.c" "wii.cpp" "cec.cpp" "wii_io.cpp" "bthci.c" "btdump.c" "CEC_Device.cpp" "tvmux.cpp" "ddc.h"
+idf_component_register(SRCS "TvMux.cpp" "cec.c" "util.c" "ddc.c" "main.c" "wifi.c" "ble.c" "led.c" "webserver.c" "health.c" "wii.c" "wii_io.c" "bthci.c" "btdump.c"
                     INCLUDE_DIRS ".")
 
