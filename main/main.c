@@ -47,8 +47,8 @@ void app_main(void)
     bool setup_enabled;
  
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&spiffs));
-    ESP_ERROR_CHECK(wifi_init());
-    ESP_ERROR_CHECK(webserver_init());
+    // ESP_ERROR_CHECK(wifi_init());
+    // ESP_ERROR_CHECK(webserver_init());
     ESP_ERROR_CHECK(ddc_init());
     ESP_ERROR_CHECK(cec_init());
     ESP_ERROR_CHECK(tvmux_init(&setup_enabled));
@@ -60,7 +60,7 @@ void app_main(void)
     else
     {
         ESP_LOGI(TAG, "setup mode disabled");
-        ESP_ERROR_CHECK(wii_init());
+        //ESP_ERROR_CHECK(wii_init());
     }
 
     vTaskDelay(5000 / portTICK_PERIOD_MS);

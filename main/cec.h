@@ -17,23 +17,26 @@
 #define CEC_POWER_TRANS_OFF             (3)
 #define CEC_POWER_UNKNOWN               (0xff)
 
-
-#define CEC_TV_ADDRESS                  (0)
-#define CEC_RECORDING_DEVICE_1_ADDRESS  (1)
-#define CEC_RECORDING_DEVICE_2_ADDRESS  (2)
-#define CEC_TUNER_1_ADDRESS             (3)
-#define CEC_PLAYBACK_DEVICE_1_ADDRESS   (4)
-#define CEC_AUDIO_SYSTEM_ADDRESS        (5)
-#define CEC_TUNER_2_ADDRESS             (6)
-#define CEC_TUNER_3_ADDRESS             (7)
-#define CEC_PLAYBACK_DEVICE_2_ADDRESS   (8)
-#define CEC_RECORDING_DEVICE_3_ADDRESS  (9)
-#define CEC_TUNER_4_ADDRESS             (10)
-#define CEC_PLAYBACK_DEVICE_3_ADDRESS   (11)
-#define CEC_RESERVED_1_ADDRESS          (12)
-#define CEC_RESERVED_2_ADDRESS          (13)
-#define CEC_FREE_USE_ADDRESS            (14)
-#define CEC_BROADCAST_ADDRESS           (15)
+typedef enum 
+{
+    CLA_TV = 0,
+    CLA_RECORDING_DEVICE_1,
+    CLA_RECORDING_DEVICE_2,
+    CLA_TUNER_1,
+    CLA_PLAYBACK_DEVICE_1,
+    CLA_AUDIO_SYSTEM,
+    CLA_TUNER_2,
+    CLA_TUNER_3,
+    CLA_PLAYBACK_DEVICE_2,
+    CLA_RECORDING_DEVICE_3,
+    CLA_TUNER_4,
+    CLA_PLAYBACK_DEVICE_3,
+    CLA_RESERVED_1,
+    CLA_RESERVED_2,
+    CLA_FREE_USE,
+    CLA_UNREGISTERED,
+} 
+cec_logical_address_t;
 
 typedef struct
 {
