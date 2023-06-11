@@ -47,12 +47,12 @@ void app_main(void)
     bool setup_enabled;
  
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&spiffs));
-    // ESP_ERROR_CHECK(wifi_init());
-    // ESP_ERROR_CHECK(webserver_init());
+    ESP_ERROR_CHECK(wifi_init());
+    ESP_ERROR_CHECK(webserver_init());
     ESP_ERROR_CHECK(ddc_init());
     ESP_ERROR_CHECK(cec_init());
     ESP_ERROR_CHECK(tvmux_init(&setup_enabled));
-    if (setup_enabled)
+    if (true || setup_enabled)
     {
         ESP_LOGI(TAG, "setup mode enabled");
         ESP_ERROR_CHECK(ble_init());

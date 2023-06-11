@@ -13,4 +13,7 @@ cJSON* get_json(const char* url);
 
 void send_WOL(const char* mac, int repeat, int repeat_delay_ms);
 
+void delay_until(int64_t time);
+void delay_us(int64_t time);
+
 #endif

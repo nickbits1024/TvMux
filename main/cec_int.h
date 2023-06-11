@@ -28,7 +28,8 @@ typedef struct
 }
 cec_bit_t;
 
-#define CEC_BIT_QUEUE_LENGTH            (500)
+#define CEC_FRAME_QUEUE_LENGTH          (100)
+#define CEC_DEBUG_BIT_QUEUE_LENGTH      (1000)
 
 #define CEC_START_MARGIN                (200)
 #define CEC_START0_TIME                 (3700)
@@ -38,24 +39,36 @@ cec_bit_t;
 #define CEC_START_MIN                   (CEC_START_TIME - CEC_START_MARGIN)
 #define CEC_START_MAX                   (CEC_START_TIME + CEC_START_MARGIN)
 
-#define CEC_BIT_TIME                   (2400)
+#define CEC_BIT_TIME                    (2400)
+#define CEC_NEXT_START_MIN_TIME         (2050)
+
+#define CEC_FRAME_RETRY_MAX             (5)
 
 #define CEC_BIT_TIME_MIN                (1300)
 #define CEC_BIT_TIME_MAX                (2750)
+#define CEC_BIT_TIME_SAMPLE             (1050)
 
 #define CEC_DATA1_MIN                   (400)
+#define CEC_DATA1_TIME                  (600)
 #define CEC_DATA1_MAX                   (800)
 #define CEC_DATA0_MIN                   (1300)
+#define CEC_DATA0_TIME                  (1500)
 #define CEC_DATA0_MAX                   (1700)
 
-#define CEC_BLOCK_EOM_MASK                (2)
-#define CEC_BLOCK_ACK_MASK                (1)
-#define CEC_BLOCK_EOM(x)                  (((x) & CEC_BLOCK_EOM_MASK) != 0)
-#define CEC_BLOCK_ACK(x)                  (((x) & CEC_BLOCK_ACK_MASK) != 0)
-#define CEC_BLOCK_DATA(x)                 (((x) >> 2) & 0xff)
+#define CEC_WAIT_NEW                    (5)
+#define CEC_WAIT_CONTINUE               (7)
+#define CEC_WAIT_RETRY                  (3)
 
-#define CEC_HEAD_INIT(x)                  (((x) >> 6) & 0xf)
-#define CEC_HEAD_DEST(x)                  (((x) >> 2) & 0xf)
+#define CEC_BLOCK_EOM_MASK              (2)
+#define CEC_BLOCK_ACK_MASK              (1)
+#define CEC_BLOCK_EOM(x)                (((x) & CEC_BLOCK_EOM_MASK) != 0)
+#define CEC_BLOCK_ACK(x)                (((x) & CEC_BLOCK_ACK_MASK) == 0)
+#define CEC_BLOCK_DATA(x)               (((x) >> 2) & 0xff)
+
+#define CEC_HEAD_SRC(x)                 (((x) >> 6) & 0xf)
+#define CEC_HEAD_DEST(x)                (((x) >> 2) & 0xf)
+
+#define CEC_ACK_OK(broadcast, ack)      (((broadcast) && !(ack)) || (!broadcast && (ack)))
 
 typedef enum
 {
@@ -80,11 +93,20 @@ typedef enum
     CEC_DATA_6,
     CEC_DATA_7,
     CEC_DATA_EOM,
-    CEC_DATA_ACK
+    CEC_DATA_ACK,
+    CEC_STATE_END
 } cec_state_t;
 
 static void cec_loop(void* param);
-static void cec_bit_handle(bool bit, int64_t time_ms, int64_t last_low_time_ms);
+#if 0
+static void cec_loop_debug(void* param);
+static void cec_loop_debug2(void* param);
+static void cec_isr_debug(void* param);
+#endif
+static bool cec_bit_handle(cec_frame_t* frame, bool bit, int64_t time_ms, int64_t last_low_time_ms, bool debug);
+static void cec_frame_handle(const cec_frame_t* frame, bool debug);
 static bool cec_edid_parse(unsigned char* edid);
 static bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext);
 static void cec_isr(void* param);
+static esp_err_t cec_frame_queue_add(cec_frame_t* frame);
+static esp_err_t cec_frame_transmit(cec_frame_t* frame);

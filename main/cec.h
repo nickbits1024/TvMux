@@ -3,7 +3,8 @@
 
 #include "esp_http_server.h"
 
-#define CEC_MAX_MSG_SIZE                (16)
+#define CEC_FRAME_SIZE_MAX              (16)
+#define CEC_FRAME_DATA_SIZE_MAX         (15)
 #define CEC_MAX_ADDRESS                 (0x0f)
 
 #define CEC_TV_HDMI_INPUT               (1)
@@ -19,39 +20,49 @@
 
 typedef enum 
 {
-    CLA_TV = 0,
-    CLA_RECORDING_DEVICE_1,
-    CLA_RECORDING_DEVICE_2,
-    CLA_TUNER_1,
-    CLA_PLAYBACK_DEVICE_1,
-    CLA_AUDIO_SYSTEM,
-    CLA_TUNER_2,
-    CLA_TUNER_3,
-    CLA_PLAYBACK_DEVICE_2,
-    CLA_RECORDING_DEVICE_3,
-    CLA_TUNER_4,
-    CLA_PLAYBACK_DEVICE_3,
-    CLA_RESERVED_1,
-    CLA_RESERVED_2,
-    CLA_FREE_USE,
-    CLA_UNREGISTERED,
+    CEC_LA_TV = 0,
+    CEC_LA_RECORDING_DEVICE_1,
+    CEC_LA_RECORDING_DEVICE_2,
+    CEC_LA_TUNER_1,
+    CEC_LA_PLAYBACK_DEVICE_1,
+    CEC_LA_AUDIO_SYSTEM,
+    CEC_LA_TUNER_2,
+    CEC_LA_TUNER_3,
+    CEC_LA_PLAYBACK_DEVICE_2,
+    CEC_LA_RECORDING_DEVICE_3,
+    CEC_LA_TUNER_4,
+    CEC_LA_PLAYBACK_DEVICE_3,
+    CEC_LA_RESERVED_1,
+    CEC_LA_RESERVED_2,
+    CEC_LA_FREE_USE,
+    CEC_LA_UNREGISTERED,
+    CEC_LA_BROADCAST = 0xf
 } 
 cec_logical_address_t;
 
+typedef enum
+{
+    CEC_FRAME_RX,
+    CEC_FRAME_TX    
+} cec_frame_type_t;
+
 typedef struct
 {
-    uint8_t targetAddress;
-    uint8_t size;
-    uint8_t data[CEC_MAX_MSG_SIZE];
-} CEC_MESSAGE;
+    cec_frame_type_t type;
+    uint8_t src_addr : 4;
+    uint8_t dest_addr : 4;
+    uint8_t data_size;
+    uint8_t data[CEC_FRAME_DATA_SIZE_MAX];
+    bool ack;
+} cec_frame_t;
 
 typedef struct 
 {
     uint8_t direction;
     uint8_t size;
     bool ack;
-    uint8_t data[CEC_MAX_MSG_SIZE];
-} CEC_LOG_ENTRY;
+    uint8_t data[CEC_FRAME_SIZE_MAX];
+} cec_log_entry_t;
 
 esp_err_t cec_init();
 esp_err_t cec_queue_clear();
@@ -66,6 +77,8 @@ esp_err_t cec_control(int target_address, const uint8_t* request, int request_si
 esp_err_t cec_sam_request(uint16_t addr);
 esp_err_t cec_as_set(uint16_t addr);
 esp_err_t cec_tv_on();
+esp_err_t cec_test();
+esp_err_t cec_test2();
 
 esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv);
 

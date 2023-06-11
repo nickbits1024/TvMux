@@ -95,6 +95,22 @@ esp_err_t webserver_init()
 
     httpd_uri = (httpd_uri_t)
     {
+      .uri = "/cec/test",
+      .method = HTTP_GET,
+      .handler = webserver_cec_test_get
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(webserver_handle, &httpd_uri));
+
+    httpd_uri = (httpd_uri_t)
+    {
+      .uri = "/cec/test2",
+      .method = HTTP_GET,
+      .handler = webserver_cec_test2_get
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(webserver_handle, &httpd_uri));
+
+    httpd_uri = (httpd_uri_t)
+    {
       .uri = "/cec",
       .method = HTTP_GET,
       .handler = webserver_cec_get
@@ -433,6 +449,35 @@ esp_err_t webserver_wii_post(httpd_req_t* request)
     cJSON_Delete(request_doc);
 
     return ESP_OK;
+
+}
+
+esp_err_t webserver_cec_test_get(httpd_req_t* request)
+{
+    esp_err_t result = cec_test();
+
+    cJSON* response_doc = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(response_doc, "status",  result == ESP_OK ? "ok" : "error");
+    cJSON_AddNumberToObject(response_doc, "error", result);
+
+    webserver_complete_request(request, response_doc);
+
+    return ESP_OK;
+}
+
+esp_err_t webserver_cec_test2_get(httpd_req_t* request)
+{
+    esp_err_t result = cec_test2();
+
+    cJSON* response_doc = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(response_doc, "status",  result == ESP_OK ? "ok" : "error");
+    cJSON_AddNumberToObject(response_doc, "error", result);
+
+    webserver_complete_request(request, response_doc);
+
+    return ESP_OK;
 }
 
 esp_err_t webserver_cec_log_get(httpd_req_t* request)
@@ -493,7 +538,7 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
     }
 
     char addr_string[3];
-    char cmd_string[CEC_MAX_MSG_SIZE * 3];
+    char cmd_string[CEC_FRAME_SIZE_MAX * 3];
 
     if (httpd_query_key_value(qs, "addr", addr_string, sizeof(addr_string)) != ESP_OK ||
         httpd_query_key_value(qs, "cmd", cmd_string, sizeof(cmd_string)) != ESP_OK)
@@ -514,8 +559,8 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
         addr = 0xf;
     }
 
-    uint8_t cmd[CEC_MAX_MSG_SIZE];
-    uint8_t reply[CEC_MAX_MSG_SIZE];
+    uint8_t cmd[CEC_FRAME_SIZE_MAX];
+    uint8_t reply[CEC_FRAME_SIZE_MAX];
     int len = (strlen(cmd_string) + 1) / 3;
     if (len == 0 ||
         len > sizeof(cmd) ||
@@ -542,12 +587,12 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
     }
 
     //std::string reply_string;
-    char reply_string[CEC_MAX_MSG_SIZE * 3 + 1] = { };
+    char reply_string[CEC_FRAME_SIZE_MAX * 3 + 1] = { };
     const char* status = "ok";
 
     if (has_reply)
     {
-        int reply_size = CEC_MAX_MSG_SIZE;
+        int reply_size = CEC_FRAME_SIZE_MAX;
         if (tvmux_cec_control(addr, cmd, len, (uint8_t)reply_filter, reply, &reply_size) == ESP_OK)
         {
             format_bytes(reply_string, sizeof(reply_string), reply + 1, reply_size - 1);

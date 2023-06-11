@@ -85,7 +85,9 @@
         "streambuf": "c",
         "thread": "c",
         "cinttypes": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "stdbool.h": "c",
+        "stdatomic.h": "c"
     },
     "idf.flashType": "UART"
 }

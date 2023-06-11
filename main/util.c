@@ -10,7 +10,9 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
+#include "rom/ets_sys.h"
 #include "esp_check.h"
+#include "esp_timer.h"
 #include "esp_netif.h"
 #include "util_int.h"
 #include "util.h"
@@ -414,4 +416,25 @@ void send_WOL(const char* mac, int repeat, int repeat_delay_ms)
 
         vTaskDelay(repeat_delay_ms / portTICK_PERIOD_MS);
     }
+}
+
+void delay_until(int64_t time)
+{
+    //portDISABLE_INTERRUPTS();
+    int64_t start = esp_timer_get_time();
+    while (esp_timer_get_time() < time)
+    {
+        __asm__ __volatile__ ("nop");
+    }
+    if (esp_timer_get_time() - start - time > 200)
+    {
+        ESP_LOGE(TAG, "delay_until off desired %lld actual %lld", (time - start), (esp_timer_get_time() - start));
+    }
+    //portENABLE_INTERRUPTS();
+}
+
+void delay_us(int64_t time)
+{
+    delay_until(esp_timer_get_time() + time);
+    //ets_delay_us(time);
 }

@@ -305,8 +305,9 @@ esp_err_t ble_init()
     ESP_LOGI(TAG, "load ssid %s", wifi_ssid);
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    ESP_RETURN_ON_ERROR(esp_bt_controller_init(&bt_cfg),TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(err_rc_));
-    ESP_RETURN_ON_ERROR(esp_bt_controller_enable(ESP_BT_MODE_BLE), TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(err_rc_));
+    //esp_bt_mode_t mode = ESP_BT_MODE_BTDM;
+    ESP_RETURN_ON_ERROR(esp_bt_controller_init(&bt_cfg), TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(err_rc_));
+    ESP_RETURN_ON_ERROR(esp_bt_controller_enable(ESP_BT_MODE_BTDM), TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(err_rc_));
     ESP_RETURN_ON_ERROR(esp_bluedroid_init(), TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(err_rc_));
     ESP_RETURN_ON_ERROR(esp_bluedroid_enable(), TAG, "%s enable bluetooth failed: %s", __func__, esp_err_to_name(err_rc_));
     ESP_RETURN_ON_ERROR(esp_ble_gatts_register_callback(gatts_profile_event_handler), TAG, "gatts register error (%s)", esp_err_to_name(err_rc_));
