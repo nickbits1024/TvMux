@@ -19,10 +19,14 @@
 
 #define TAG "cec"
 
-QueueHandle_t cec_frame_queue;
-QueueHandle_t cec_debug_bit_queue;
-QueueHandle_t cec_debug_bit_queue2;
+QueueHandle_t cec_frame_queue_handle;
+//QueueHandle_t cec_debug_bit_queue_handle;
+//QueueHandle_t cec_debug_bit_queue2_handle;
+esp_timer_handle_t cec_ack_timer_handle;
+
 //cec_state_t cec_state = CEC_IDLE;
+SemaphoreHandle_t cec_ack_sem;
+//int64_t cec_ack_time;
 atomic_bool cec_line_error;
 atomic_uchar cec_last_source = CEC_LA_UNREGISTERED;
 atomic_uchar cec_log_addr = CEC_LA_UNREGISTERED;
@@ -81,13 +85,15 @@ esp_err_t cec_init()
     io_conf.mode = GPIO_MODE_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_ANYEDGE;
+    io_conf.intr_type = GPIO_INTR_DISABLE; // GPIO_INTR_ANYEDGE
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    cec_frame_queue = xQueueCreate(CEC_FRAME_QUEUE_LENGTH, sizeof(cec_frame_t));
-    //cec_debug_bit_queue = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
-    //cec_debug_bit_queue2 = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
+    cec_frame_queue_handle = xQueueCreate(CEC_FRAME_QUEUE_LENGTH, sizeof(cec_frame_t));
+    //cec_debug_bit_queue_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
+    //cec_debug_bit_queue2_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
+
+    cec_ack_sem = xSemaphoreCreateBinary();    
 
     ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_NUM, 1));
     ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_2_NUM, 1));
@@ -97,7 +103,18 @@ esp_err_t cec_init()
     //ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_EDGE));
     //ESP_ERROR_CHECK(gpio_isr_handler_add(HDMI_CEC_GPIO_2_NUM, cec_isr_debug, NULL));
 
+    esp_timer_create_args_t timer_args = 
+    {
+        .callback = cec_ack_timer_callback,
+        .dispatch_method = ESP_TIMER_ISR,
+        .name = "cec_ack_timer",
+        .skip_unhandled_events = true
+    };
+
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &cec_ack_timer_handle));
+
     xTaskCreatePinnedToCore(cec_loop, "cec_loop", 8000, NULL, 20, NULL, APP_CPU_NUM);
+    //xTaskCreatePinnedToCore(cec_ack_loop, "cec_ack_loop", 8000, NULL, 20, NULL, APP_CPU_NUM);
     //xTaskCreate(cec_loop_debug, "cec_loop_debug", 8000, NULL, 20, NULL);
     //xTaskCreate(cec_loop_debug2, "cec_loop_debug2", 8000, NULL, 20, NULL);
 
@@ -136,7 +153,7 @@ static void IRAM_ATTR cec_isr_debug(void* param)
 
         bool first = true;
 
-        while (xQueueSendFromISR(cec_debug_bit_queue, &bit, NULL) != pdTRUE)
+        while (xQueueSendFromISR(cec_debug_bit_queue_handle, &bit, NULL) != pdTRUE)
         {
             if (first)
             {
@@ -165,8 +182,8 @@ static void IRAM_ATTR cec_isr(void* param)
 
     if (atomic_load(&busy))
     {
-        ets_printf("cec_isr is not re-entrant\n");
-        esp_restart();
+        ESP_DRAM_LOGE(TAG, "cec_isr is not re-entrant");
+        //esp_restart();
         return;
     }
     atomic_store(&busy, true);
@@ -182,13 +199,6 @@ static void IRAM_ATTR cec_isr(void* param)
 
     if (last_time != 0)
     {
-        // cec_bit_t bit;
-
-        // bit.time = time;
-        // bit.last_time = last_time;
-        // bit.last_low_time = last_low_time;
-        // bit.low = was_low;
-
         int64_t time_us = time - last_time;
         int64_t last_low_time_us = last_time - last_low_time;
 
@@ -196,11 +206,11 @@ static void IRAM_ATTR cec_isr(void* param)
         {
             bool first = true;
 
-            while (xQueueSendFromISR(cec_frame_queue, &frame, NULL) != pdTRUE) 
+            while (xQueueSendFromISR(cec_frame_queue_handle, &frame, NULL) != pdTRUE) 
             { 
                 if (first)
                 {
-                    ets_printf("cec_isr queue full\n");
+                    ESP_DRAM_LOGE(TAG, "cec_isr queue full\n");
                     first = false;
                 }
             }
@@ -224,9 +234,9 @@ void cec_loop_debug(void* param)
     cec_bit_t bit;
     for (;;)
     {
-        if (xQueueReceive(cec_debug_bit_queue, &bit, portMAX_DELAY) == pdTRUE)
+        if (xQueueReceive(cec_debug_bit_queue_handle, &bit, portMAX_DELAY) == pdTRUE)
         {
-			if (xQueueSend(cec_debug_bit_queue2, &bit, 0) != pdTRUE)
+			if (xQueueSend(cec_debug_bit_queue2_handle, &bit, 0) != pdTRUE)
 			{
 				ESP_LOGE(TAG, "cec_debug_bit_queue2 full");
 				continue;
@@ -255,7 +265,7 @@ void cec_loop_debug2(void* param)
     cec_bit_t bit;
     for (;;)
     {
-        if (xQueueReceive(cec_debug_bit_queue2, &bit, portMAX_DELAY) == pdTRUE)
+        if (xQueueReceive(cec_debug_bit_queue2_handle, &bit, portMAX_DELAY) == pdTRUE)
         {
             ESP_LOGI(TAG, "bits incoming...");
             vTaskDelay(5000 / portTICK_PERIOD_MS);
@@ -274,7 +284,7 @@ void cec_loop_debug2(void* param)
                     memset(&frame, 0, sizeof(cec_frame_t));
                 }            
             }
-            while (xQueueReceive(cec_debug_bit_queue2, &bit, 0) == pdTRUE);
+            while (xQueueReceive(cec_debug_bit_queue2_handle, &bit, 0) == pdTRUE);
         }
     }
 
@@ -307,9 +317,10 @@ void cec_loop(void* param)
                 //printf("%02x ", edid[i]);
             }
             // printf("\n");
-            ESP_LOGI(TAG, "Received EDID");        
+            ESP_LOGI(TAG, "EDID received");        
             // vTaskDelay(5000 / portTICK_PERIOD_MS);
-        } while (!cec_edid_parse(edid));
+        } 
+        while (!cec_edid_parse(edid));
 
         if (edid[DDC_EDID_EXTENSION_FLAG])
         {
@@ -320,9 +331,10 @@ void cec_loop(void* param)
                     ESP_ERROR_CHECK(ddc_read_byte(DDC_EDID_ADDRESS, DDC_EDID_LENGTH + i, &edid_extension[i]));
                 }
 
-                ESP_LOGI(TAG, "Received EDID extension");
+                ESP_LOGI(TAG, "EDID extension received");
 
-            } while (!cec_edid_extension_parse(edid, edid_extension));
+            } 
+            while (!cec_edid_extension_parse(edid, edid_extension));
         }
 
         cec_frame_t frame = { 0 };
@@ -330,13 +342,12 @@ void cec_loop(void* param)
         atomic_store(&cec_log_addr, CEC_LA_UNREGISTERED);
 
         cec_logical_address_t la_candidates[] = { CEC_LA_TUNER_1, CEC_LA_TUNER_2, CEC_LA_TUNER_3, CEC_LA_TUNER_4 };
-        //cec_logical_address_t la_candidates[] = { CEC_LA_PLAYBACK_DEVICE_1, CEC_LA_AUDIO_SYSTEM, CEC_LA_TV, CEC_LA_TUNER_4 };
 
         for (int i = 0; i < sizeof(la_candidates) / sizeof(cec_logical_address_t); i++)
         {
             cec_logical_address_t la = la_candidates[i];
 
-            ESP_LOGI(TAG, "poll %01x%01x", la, la);
+            ESP_LOGI(TAG, "poll la %d", la);
 
             frame.type = CEC_FRAME_TX;
             frame.src_addr = la;
@@ -346,17 +357,17 @@ void cec_loop(void* param)
 
             if (result == ESP_ERR_TIMEOUT)
             {
-                ESP_LOGI(TAG, "la %01x free", la);
+                ESP_LOGI(TAG, "la %d free", la);
                 atomic_store(&cec_log_addr, la);
                 break;
             }
             else if (result == ESP_OK)
             {
-                ESP_LOGI(TAG, "la %01x in use", la);
+                ESP_LOGI(TAG, "la %d in use", la);
             }
             else
             {
-                ESP_LOGI(TAG, "la %01x error (%s)", la, esp_err_to_name(result));
+                ESP_LOGI(TAG, "la %d error (%s)", la, esp_err_to_name(result));
             }
         }
 
@@ -367,26 +378,23 @@ void cec_loop(void* param)
 
         for (;;)
         {
-            if (xQueueReceive(cec_frame_queue, &frame, portMAX_DELAY) == pdTRUE)
+            if (xQueueReceive(cec_frame_queue_handle, &frame, portMAX_DELAY) == pdTRUE)
             {
-                //bool low = bit.low;
-                //int64_t time_us = bit.time - bit.last_time;
-                //int64_t last_low_time_us = bit.last_time - bit.last_low_time;
-                //int64_t lag_us = esp_timer_get_time() - bit.time;
-                //ESP_LOGI(TAG, "%s %llu us last low %llu lag %llu us", low ? "low" : "high", time_us, last_low_time_us, lag_us);
-
                 if (frame.type == CEC_FRAME_TX)
                 {
                     cec_frame_transmit(&frame);
                 }
 
                 cec_frame_handle(&frame, false);
-                
-                //memset(&frame, 0, sizeof(cec_frame_t));
             }
         }
     }
     vTaskDelete(NULL);
+}
+
+static void cec_ack_timer_callback(void* param)
+{
+    gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
 }
 
 static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_t last_low_time_us, bool debug)
@@ -414,6 +422,7 @@ static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_
                 else
                 {
                     if (debug) ESP_LOGE(TAG, "bad start1 bit %llu", time_us);
+                    else ESP_DRAM_LOGE(TAG, "bad start1 bit %llu", time_us);
                 }
             }
             break;
@@ -427,6 +436,7 @@ static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_
             else
             {
                 if (debug) ESP_LOGE(TAG, "bad start bit %llu", last_low_time_us + time_us);
+                else ESP_DRAM_LOGE(TAG, "bad start bit %llu", last_low_time_us + time_us);
                 cec_state = CEC_IDLE;
             }
             break;
@@ -464,7 +474,9 @@ static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_
                 }
                 else 
                 {
-                    if (debug) ESP_LOGI(TAG, "%s bit low error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
+                    if (debug) ESP_LOGE(TAG, "%s bit low error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
+                    else ESP_DRAM_LOGE(TAG, "%s bit low error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
+
                     cec_state = CEC_IDLE;
                     break;
                 }
@@ -520,16 +532,29 @@ static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_
             }
             else
             {
-                if (!CEC_BLOCK_EOM(block))
+                if (cec_state == CEC_HEAD_ACK || cec_state == CEC_DATA_ACK)
                 {
-                    uint64_t bit_time = last_low_time_us + time_us;
-                    if (bit_time < CEC_BIT_TIME_MIN || bit_time > CEC_BIT_TIME_MAX)
+                    //int8_t level = gpio_get_level(HDMI_CEC_GPIO_NUM);
+                    int8_t la = atomic_load(&cec_log_addr);
+                    int8_t src = cec_state == CEC_DATA_ACK ? frame->src_addr : (block >> 5) & 0xf;
+                    int8_t dest = cec_state == CEC_DATA_ACK ? frame->dest_addr : (block >> 1) & 0xf;
+                    if (src != dest && la == dest)
                     {
-                        if (debug) ESP_LOGI(TAG, "%s bit high error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
-                        cec_state = CEC_IDLE;
-                        break;
+                        gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
+                        esp_err_t result = esp_timer_start_once(cec_ack_timer_handle, CEC_DATA0_TIME);
+                        if (result != ESP_OK)
+                        {
+                            ESP_DRAM_LOGE(TAG, "ack_timer esp_timer_start_once failed (%s)", esp_err_to_name(result));
+                        }
+
+                        //ESP_DRAM_LOGI(TAG, "ack set (%lld us low %lld us) level %d block %02x la %d src %d dest %d", time_us, last_low_time_us, level, block, la, src, dest);
+                    }
+                    else
+                    {
+                        //ESP_DRAM_LOGI(TAG, "ack not set (%lld us) level %d block %02x la %d src %d dest %d", time_us, level, block, la, src, dest);
                     }
                 }
+
             }
             break;
         default:
@@ -658,21 +683,6 @@ bool cec_edid_parse(unsigned char* edid)
     //ESP_LOGI(TAG, "EDID extension_flag: %d", extension_flag);
 
     return true;
-    /*
-
-      uint8_t ieee0 = edid[0x95];
-      uint8_t ieee1 = edid[0x96];
-      uint8_t ieee2 = edid[0x97];
-      uint16_t physicalAddress = edid[0x98] << 8 | edid[0x99];
-
-      ESP_LOGI(TAG, "IEEE ID: %02x%02x%02x", ieee0, ieee1, ieee2);
-      uint8_t a0 = physicalAddress >> 12;
-      uint8_t a1 = (physicalAddress >> 8) & 0xf;
-      uint8_t a2 = (physicalAddress >> 4) & 0xf;
-      uint8_t a3 = physicalAddress & 0xf;
-      ESP_LOGI(TAG, "cPhysical Address: %u.%u.%u.%u", a0, a1, a2, a3);
-
-      return true;*/
 }
 
 bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
@@ -738,7 +748,7 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
                     uint8_t a3 = cec_phy_addr & 0xf;
 
                     ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u", a0, a1, a2, a3);
-
+                    // TODO save and respond to cec inq
                 }
                 break;
             }
@@ -973,7 +983,7 @@ static bool cec_frame_transmit_byte(int64_t frame_start, int8_t* bit_index, uint
         return false;
     }
     //portENABLE_INTERRUPTS();
-    ESP_DRAM_LOGI(TAG, "tx ack %d", *ack);
+    //ESP_DRAM_LOGI(TAG, "tx ack %d", *ack);
     return true;
 }
 
@@ -994,26 +1004,6 @@ static esp_err_t cec_frame_transmit(cec_frame_t* frame)
     {
         return ESP_ERR_INVALID_ARG;
     }
-
-    // esp_timer_handle_t bit_timer;
-    // int ticks = 0;
-
-    // esp_timer_create_args_t timer_args = 
-    // {
-    //     .callback = test_timer_callback,
-    //     .arg = &ticks,
-    //     .dispatch_method = ESP_TIMER_ISR,
-    //     .name = "test",
-    //     .skip_unhandled_events = true
-    // };
-
-    // ESP_RETURN_ON_ERROR(esp_timer_create(&timer_args, &bit_timer), TAG, "esp_timer_stop failed");
-    // ESP_RETURN_ON_ERROR(esp_timer_start_periodic(bit_timer, 50), TAG, "esp_timer_start_periodic failed");
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // ESP_RETURN_ON_ERROR(esp_timer_stop(bit_timer), TAG, "esp_timer_stop failed");
-    // ESP_RETURN_ON_ERROR(esp_timer_delete(bit_timer), TAG, "esp_timer_delete failed");
-
-    // ESP_LOGI(TAG, "test ticks %d", ticks);
 
     int retry = 0;
     int8_t wait = atomic_load(&cec_last_source) == frame->src_addr ? CEC_WAIT_CONTINUE : CEC_WAIT_NEW;
@@ -1041,7 +1031,7 @@ static esp_err_t cec_frame_transmit(cec_frame_t* frame)
             atomic_store(&cec_line_error, true);
             continue;
         }
-        ESP_DRAM_LOGI(TAG, "loop ack %d", frame->ack);
+        //ESP_DRAM_LOGI(TAG, "loop ack %d", frame->ack);
 
         for (int i = 0; CEC_ACK_OK(broadcast, frame->ack) && i < frame->data_size; i++)
         {
@@ -1065,16 +1055,16 @@ static esp_err_t cec_frame_transmit(cec_frame_t* frame)
         //frame->ack = ack;
         wait = CEC_WAIT_RETRY;
     }
-    while (++retry < CEC_FRAME_RETRY_MAX && !CEC_ACK_OK(broadcast, frame->ack));
+    while (retry++ < CEC_FRAME_RETRY_MAX && !CEC_ACK_OK(broadcast, frame->ack));
 
-    ESP_LOGI(TAG, "exit ack %d", frame->ack);
+    //ESP_LOGI(TAG, "exit ack %d", frame->ack);
 
     return CEC_ACK_OK(broadcast, frame->ack) ? ESP_OK : broadcast ? ESP_ERR_INVALID_RESPONSE : ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t cec_frame_queue_add(cec_frame_t* frame)
 {
-    return xQueueSend(cec_frame_queue, frame, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
+    return xQueueSend(cec_frame_queue_handle, frame, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t cec_test()
@@ -1098,6 +1088,19 @@ esp_err_t cec_test2()
     frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
     frame.data_size = 1;
     frame.data[0] = 0x83;
+
+    return cec_frame_queue_add(&frame);
+}
+
+esp_err_t cec_test3()
+{
+    cec_frame_t frame = { 0 };
+
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
+    frame.data_size = 1;
+    frame.data[0] = 0x8f;
 
     return cec_frame_queue_add(&frame);
 }

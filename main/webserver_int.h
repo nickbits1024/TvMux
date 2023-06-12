@@ -11,6 +11,7 @@ esp_err_t webserver_cec_log_get(httpd_req_t* req);
 esp_err_t webserver_cec_get(httpd_req_t* req);
 esp_err_t webserver_cec_test_get(httpd_req_t* req);
 esp_err_t webserver_cec_test2_get(httpd_req_t* req);
+esp_err_t webserver_cec_test3_get(httpd_req_t* request);
 esp_err_t webserver_standby_get(httpd_req_t* req);
 esp_err_t webserver_tv_play_get(httpd_req_t* req);
 esp_err_t webserver_tv_pause_get(httpd_req_t* req);

@@ -98,6 +98,8 @@ typedef enum
 } cec_state_t;
 
 static void cec_loop(void* param);
+static void cec_ack_timer_callback(void* param);
+
 #if 0
 static void cec_loop_debug(void* param);
 static void cec_loop_debug2(void* param);

@@ -111,6 +111,15 @@ esp_err_t webserver_init()
 
     httpd_uri = (httpd_uri_t)
     {
+      .uri = "/cec/test3",
+      .method = HTTP_GET,
+      .handler = webserver_cec_test3_get
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(webserver_handle, &httpd_uri));
+
+
+    httpd_uri = (httpd_uri_t)
+    {
       .uri = "/cec",
       .method = HTTP_GET,
       .handler = webserver_cec_get
@@ -469,6 +478,20 @@ esp_err_t webserver_cec_test_get(httpd_req_t* request)
 esp_err_t webserver_cec_test2_get(httpd_req_t* request)
 {
     esp_err_t result = cec_test2();
+
+    cJSON* response_doc = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(response_doc, "status",  result == ESP_OK ? "ok" : "error");
+    cJSON_AddNumberToObject(response_doc, "error", result);
+
+    webserver_complete_request(request, response_doc);
+
+    return ESP_OK;
+}
+
+esp_err_t webserver_cec_test3_get(httpd_req_t* request)
+{
+    esp_err_t result = cec_test3();
 
     cJSON* response_doc = cJSON_CreateObject();
 

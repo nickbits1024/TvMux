@@ -79,6 +79,7 @@ esp_err_t cec_as_set(uint16_t addr);
 esp_err_t cec_tv_on();
 esp_err_t cec_test();
 esp_err_t cec_test2();
+esp_err_t cec_test3();
 
 esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv);
 
