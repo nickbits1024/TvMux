@@ -31,13 +31,14 @@ cec_bit_t;
 #define CEC_FRAME_QUEUE_LENGTH          (100)
 #define CEC_DEBUG_BIT_QUEUE_LENGTH      (1000)
 
+#define CEC_BIT_SAFETY                  (100)
 #define CEC_START_MARGIN                (200)
 #define CEC_START0_TIME                 (3700)
-#define CEC_START0_MIN                  (CEC_START0_TIME - CEC_START_MARGIN)
-#define CEC_START0_MAX                  (CEC_START0_TIME + CEC_START_MARGIN)
+#define CEC_START0_MIN                  (CEC_START0_TIME - CEC_START_MARGIN - CEC_BIT_SAFETY)
+#define CEC_START0_MAX                  (CEC_START0_TIME + CEC_START_MARGIN + CEC_BIT_SAFETY)
 #define CEC_START_TIME                  (4500)
-#define CEC_START_MIN                   (CEC_START_TIME - CEC_START_MARGIN)
-#define CEC_START_MAX                   (CEC_START_TIME + CEC_START_MARGIN)
+#define CEC_START_MIN                   (CEC_START_TIME - CEC_START_MARGIN - CEC_BIT_SAFETY)
+#define CEC_START_MAX                   (CEC_START_TIME + CEC_START_MARGIN + CEC_BIT_SAFETY)
 
 #define CEC_BIT_TIME                    (2400)
 #define CEC_NEXT_START_MIN_TIME         (2050)
@@ -48,12 +49,12 @@ cec_bit_t;
 #define CEC_BIT_TIME_MAX                (2750)
 #define CEC_BIT_TIME_SAMPLE             (1050)
 
-#define CEC_DATA1_MIN                   (400)
+#define CEC_DATA1_MIN                   (400 - CEC_BIT_SAFETY)
 #define CEC_DATA1_TIME                  (600)
-#define CEC_DATA1_MAX                   (800)
-#define CEC_DATA0_MIN                   (1300)
+#define CEC_DATA1_MAX                   (800 + CEC_BIT_SAFETY)
+#define CEC_DATA0_MIN                   (1300 - CEC_BIT_SAFETY)
 #define CEC_DATA0_TIME                  (1500)
-#define CEC_DATA0_MAX                   (1700)
+#define CEC_DATA0_MAX                   (1700 + CEC_BIT_SAFETY)
 
 #define CEC_WAIT_NEW                    (5)
 #define CEC_WAIT_CONTINUE               (7)
@@ -68,7 +69,7 @@ cec_bit_t;
 #define CEC_HEAD_SRC(x)                 (((x) >> 6) & 0xf)
 #define CEC_HEAD_DEST(x)                (((x) >> 2) & 0xf)
 
-#define CEC_ACK_OK(broadcast, ack)      (((broadcast) && !(ack)) || (!broadcast && (ack)))
+#define CEC_ACK_OK(broadcast, ack)      (((broadcast) && !(ack)) || (!(broadcast) && (ack)))
 
 typedef enum
 {

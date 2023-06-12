@@ -54,6 +54,7 @@ typedef struct
     uint8_t data_size;
     uint8_t data[CEC_FRAME_DATA_SIZE_MAX];
     bool ack;
+    bool bit_error;
 } cec_frame_t;
 
 typedef struct 
