@@ -59,6 +59,8 @@ cec_bit_t;
 #define CEC_WAIT_NEW                    (5)
 #define CEC_WAIT_CONTINUE               (7)
 #define CEC_WAIT_RETRY                  (3)
+#define CEC_WAIT_ERROR                  (3)
+#define CEC_LINE_ERROR_TIME             (3600)
 
 #define CEC_BLOCK_EOM_MASK              (2)
 #define CEC_BLOCK_ACK_MASK              (1)
@@ -98,18 +100,23 @@ typedef enum
     CEC_STATE_END
 } cec_state_t;
 
-static void cec_loop(void* param);
+static void cec_loop_task(void* param);
 static void cec_ack_timer_callback(void* param);
 
 #if 0
-static void cec_loop_debug(void* param);
-static void cec_loop_debug2(void* param);
+static void cec_loop_debug_task(void* param);
+static void cec_loop_debug2(_taskvoid* param);
 static void cec_isr_debug(void* param);
 #endif
+
 static bool cec_bit_handle(cec_frame_t* frame, bool bit, int64_t time_ms, int64_t last_low_time_ms, bool debug);
 static void cec_frame_handle(const cec_frame_t* frame, bool debug);
 static bool cec_edid_parse(unsigned char* edid);
 static bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext);
 static void cec_isr(void* param);
+static bool cec_frame_transmit_byte(uint8_t data, bool eom, bool* ack);
+static bool cec_frame_read_ack(bool* ack);
+static bool  cec_frame_transmit_bit(bool bit_value, int bit_wait);
 static esp_err_t cec_frame_queue_add(cec_frame_t* frame);
 static esp_err_t cec_frame_transmit(cec_frame_t* frame);
+static bool cec_transmit_start();

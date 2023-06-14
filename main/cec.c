@@ -24,14 +24,11 @@ QueueHandle_t cec_frame_queue_handle;
 //QueueHandle_t cec_debug_bit_queue2_handle;
 esp_timer_handle_t cec_ack_timer_handle;
 
-//cec_state_t cec_state = CEC_IDLE;
-SemaphoreHandle_t cec_ack_sem;
-//int64_t cec_ack_time;
 atomic_bool cec_line_error;
 atomic_uchar cec_last_source = CEC_LA_UNREGISTERED;
 atomic_uchar cec_log_addr = CEC_LA_UNREGISTERED;
 uint16_t cec_phy_addr;
-atomic_int_least64_t cec_last_activity_time_us;
+//atomic_int_least64_t cec_last_activity_time_us;
 
 const char* CEC_STATE_NAMES[] =
 {
@@ -83,7 +80,7 @@ esp_err_t cec_init()
 
     io_conf.pin_bit_mask = HDMI_CEC_GPIO_2_SEL;
     io_conf.mode = GPIO_MODE_DISABLE;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type = GPIO_INTR_DISABLE; // GPIO_INTR_ANYEDGE
 
@@ -92,8 +89,6 @@ esp_err_t cec_init()
     cec_frame_queue_handle = xQueueCreate(CEC_FRAME_QUEUE_LENGTH, sizeof(cec_frame_t));
     //cec_debug_bit_queue_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
     //cec_debug_bit_queue2_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
-
-    cec_ack_sem = xSemaphoreCreateBinary();    
 
     ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_NUM, 1));
     ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_2_NUM, 1));
@@ -113,10 +108,9 @@ esp_err_t cec_init()
 
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &cec_ack_timer_handle));
 
-    xTaskCreatePinnedToCore(cec_loop, "cec_loop", 8000, NULL, 20, NULL, APP_CPU_NUM);
-    //xTaskCreatePinnedToCore(cec_ack_loop, "cec_ack_loop", 8000, NULL, 20, NULL, APP_CPU_NUM);
-    //xTaskCreate(cec_loop_debug, "cec_loop_debug", 8000, NULL, 20, NULL);
-    //xTaskCreate(cec_loop_debug2, "cec_loop_debug2", 8000, NULL, 20, NULL);
+    xTaskCreatePinnedToCore(cec_loop_task, "cec_loop", 8000, NULL, 5, NULL, APP_CPU_NUM);
+    //xTaskCreate(cec_loop_debug_task, "cec_loop_debug", 8000, NULL, 5, NULL);
+    //xTaskCreate(cec_loop_debug2_task, "cec_loop_debug2", 8000, NULL, 5, NULL);
 
     return ESP_OK;
 }
@@ -195,7 +189,7 @@ static void IRAM_ATTR cec_isr(void* param)
 
     int64_t time = esp_timer_get_time();
 
-    atomic_store(&cec_last_activity_time_us, time);
+    //atomic_store(&cec_last_activity_time_us, time);
 
     if (last_time != 0)
     {
@@ -229,7 +223,7 @@ static void IRAM_ATTR cec_isr(void* param)
 }
 
 #if 0
-void cec_loop_debug(void* param)
+void cec_loop_debug_task(void* param)
 {
     cec_bit_t bit;
     for (;;)
@@ -259,7 +253,7 @@ void cec_loop_debug(void* param)
     vTaskDelete(NULL);
 }
 
-void cec_loop_debug2(void* param)
+void cec_loop_debug2_task(void* param)
 {
     cec_frame_t frame = { 0 };
     cec_bit_t bit;
@@ -292,11 +286,16 @@ void cec_loop_debug2(void* param)
 }
 #endif
 
-void cec_loop(void* param)
+void cec_report_physical_address_task(void* param)
+{
+    cec_report_physical_address();
+    vTaskDelete(NULL);
+}
+
+void cec_loop_task(void* param)
 {
     for (;;)
     {
-
         ESP_LOGI(TAG, "Waiting for hotplug signal...");
         // FIXME
         // while (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
@@ -376,6 +375,9 @@ void cec_loop(void* param)
             ESP_LOGI(TAG, "No free logical addresses, using unregistered address (%01x)", CEC_LA_UNREGISTERED);
         }
 
+        //xTaskCreate(cec_report_physical_address_task, "cec_report_physical_address", 2000, NULL, 1, NULL);
+        cec_report_physical_address();
+
         for (;;)
         {
             if (xQueueReceive(cec_frame_queue_handle, &frame, portMAX_DELAY) == pdTRUE)
@@ -392,12 +394,12 @@ void cec_loop(void* param)
     vTaskDelete(NULL);
 }
 
-static void cec_ack_timer_callback(void* param)
+static void IRAM_ATTR cec_ack_timer_callback(void* param)
 {
     gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
 }
 
-static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_t last_low_time_us, bool debug)
+static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_t last_low_time_us, bool debug)
 {
     static uint16_t block;
     static cec_state_t cec_state = CEC_IDLE;
@@ -522,7 +524,8 @@ static bool cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_us, int64_
                     }
                     else
                     {
-                        cec_state = CEC_IDLE;
+                        cec_state = CEC_HEAD_0;
+                        memset(frame, 0, sizeof(cec_frame_t));
                     }
 
                     block = 0;
@@ -809,6 +812,17 @@ static void cec_frame_handle(const cec_frame_t* frame, bool debug)
         1 + frame->data_size, frame->src_addr, frame->dest_addr, data_string, 
         CEC_ACK_OK(frame->dest_addr == CEC_LA_BROADCAST, frame->ack) ? "" : "!", frame->bit_error ? "*" : "");
 
+    if (frame->data_size == 0)
+    {
+        return;
+    }
+    
+    switch (frame->data[0])
+    {
+        case CEC_OP_GIVE_PHYSICAL_ADDRESS:
+            cec_report_physical_address();
+            break;
+    }
 }
 
 static void cec_line_wait_free(int bit_periods)
@@ -823,20 +837,12 @@ static void cec_line_wait_free(int bit_periods)
     }
 }
 
-static bool cec_transmit_start(int64_t frame_start)
+static bool cec_transmit_start()
 {
-    //portDISABLE_INTERRUPTS();
     if (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
     {
         return false;
     }
-#if 0
-    gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
-    delay_until(frame_start + CEC_START0_TIME);
-    gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
-    //delay_until(frame_start + CEC_START_TIME);
-    //portENABLE_INTERRUPTS();
-#else
     int64_t bit_start = esp_timer_get_time();
 
     gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
@@ -844,69 +850,29 @@ static bool cec_transmit_start(int64_t frame_start)
     gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
     delay_until(bit_start + CEC_START_TIME);
 
-#endif
-
     return true;
 }
 
-//static int lag0;
-//static int lag1;
-
-static bool  cec_frame_transmit_bit(int64_t frame_start, int8_t* bit_index, bool bit_value, int bit_wait)
+static bool  cec_frame_transmit_bit(bool bit_value, int bit_wait)
 {
     if (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
     {
         return false;
     }
 
-#if 0
-    //ESP_LOGI(TAG, "tx bit %d", bit_value ? 1 : 0);
-    int64_t bit_start = frame_start + CEC_START_TIME + *bit_index * CEC_BIT_TIME;
-    delay_until(bit_start);
-    //int64_t bit_start = esp_timer_get_time();
-    gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
-    // while (gpio_get_level(HDMI_CEC_GPIO_NUM) == 1)
-    // {
-    //     lag0++;
-    //     //__asm__ __volatile__ ("nop");
-    // }
-    //delay_until(bit_start + (bit_value ? CEC_DATA1_TIME : CEC_DATA0_TIME));
-    delay_until(bit_start + (bit_value ? CEC_DATA1_TIME : CEC_DATA0_TIME));
-    gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
-    // while (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
-    // {
-    //     lag1++;
-    //     //__asm__ __volatile__ ("nop");
-    // }
-    // if (bit_wait > 0)
-    // {
-    //     delay_until(bit_start + bit_wait);
-    // }
-
-   (*bit_index)++;
-#else
     int64_t bit_start = esp_timer_get_time();
     gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
     delay_us(bit_value ? CEC_DATA1_TIME : CEC_DATA0_TIME);
     gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
     delay_until(bit_start + bit_wait);
-#endif
+
     return true;
 }
 
-static bool cec_frame_read_ack(int64_t frame_start, int8_t* bit_index, bool* ack)
+static bool cec_frame_read_ack(bool* ack)
 {
-#if 0
-    int64_t bit_start = frame_start + CEC_START_TIME + *bit_index * CEC_BIT_TIME;
-
-    delay_until(bit_start + CEC_BIT_TIME_SAMPLE);
-
-    (*bit_index)++;
-
-    return gpio_get_level(HDMI_CEC_GPIO_NUM) == 0;
-#else
     int64_t bit_start = esp_timer_get_time();
-    if (!cec_frame_transmit_bit(0, NULL, true, CEC_BIT_TIME_SAMPLE))
+    if (!cec_frame_transmit_bit(true, CEC_BIT_TIME_SAMPLE))
     {
         return false;
     }
@@ -915,123 +881,52 @@ static bool cec_frame_read_ack(int64_t frame_start, int8_t* bit_index, bool* ack
     delay_until(bit_start + CEC_BIT_TIME);
 
     return true;
-#endif
-
-    //int64_t bit_start = esp_timer_get_time(); //frame_start + CEC_START_TIME + *bit_index * CEC_BIT_TIME;
-    // int64_t bit_start_min = bit_start;
-
-    // if (*bit_index > 0)
-    // {
-    //     bit_start_min -= CEC_BIT_TIME;
-    //     bit_start_min += CEC_NEXT_START_MIN_TIME;
-    // }
-
-    // //int zeros = 0;
-    // int64_t now = esp_timer_get_time();
-    // while (esp_timer_get_time() < bit_start + CEC_BIT_TIME)
-    // {
-    //     //__asm__ __volatile__ ("nop");
-
-    //     if (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
-    //     {
-    //         zeros++;
-    //     }
-    // }
-
-    //ets_delay_us(CEC_BIT_TIME);
-
-    //return true;
-
-    // while (gpio_get_level(HDMI_CEC_GPIO_NUM) == 1)
-    // {
-    //     __asm__ __volatile__ ("nop");
-    //     //taskYIELD();
-    // }
-
-    // ets_delay_us(CEC_BIT_SAMPLE_TIME);
-
-    // bool ack = gpio_get_level(HDMI_CEC_GPIO_NUM) == 0;
-
-    // ESP_LOGI(TAG, "bit ack %d", ack);
-
-    // return ack;
-
-
-    //ESP_LOGI(TAG, "bit zeros %d time %lld lag %d %d", zeros, esp_timer_get_time() - now, lag0, lag1);
-
-    //return zeros > 0;
-
-    //delay_until(bit_start_min);
-
-    // bool bit;
-    // while ((bit = gpio_get_level(HDMI_CEC_GPIO_NUM) == 1) && esp_timer_get_time() < bit_start + CEC_BIT_TIME)
-    // {
-    //     __asm__ __volatile__ ("nop");
-    // }
-    // if (!bit)
-    // {
-    //     int64_t low_time = esp_timer_get_time();
-    //     delay_until(low_time + CEC_BIT_SAMPLE_TIME);
-    //     return gpio_get_level(HDMI_CEC_GPIO_NUM) == 1;
-    //     // while (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
-    //     // {
-    //     //     __asm__ __volatile__ ("nop");
-    //     // }
-    //     // int64_t time_us = esp_timer_get_time() - low_time;
-    //     // ESP_LOGI(TAG, "read bit time %llu", time_us);
-
-    //     // if (time_us >= CEC_DATA1_MIN && time_us <= CEC_DATA1_MAX)
-    //     // {                  
-    //     //     return true;
-    //     // }
-    //     // else if (time_us >= CEC_DATA0_MIN && time_us <= CEC_DATA0_MAX)
-    //     // {
-    //     //     return false;
-    //     // }
-    // }
 }
 
 
-static bool cec_frame_transmit_byte(int64_t frame_start, int8_t* bit_index, uint8_t data, bool eom, bool* ack)
+static bool cec_frame_transmit_byte(uint8_t data, bool eom, bool* ack)
 {
     *ack = false;
 
-    //portDISABLE_INTERRUPTS();
     uint8_t shift = 7;
 
     for (int i = 0; i < 8; i++)
     {
         //ESP_LOGI(TAG, "bit shift %d value %d", shift, (data >> shift) & 1);
-        if (!cec_frame_transmit_bit(frame_start, bit_index, (data >> shift) & 1, CEC_BIT_TIME))
+        if (!cec_frame_transmit_bit((data >> shift) & 1, CEC_BIT_TIME))
         {
             return false;
         }
         shift--;
     }
-    if (!cec_frame_transmit_bit(frame_start, bit_index, eom, CEC_BIT_TIME))
+    if (!cec_frame_transmit_bit(eom, CEC_BIT_TIME))
     {
         return false;
     }
-    //int bi = *bit_index;
-    if (!cec_frame_read_ack(frame_start, bit_index, ack))
+    if (!cec_frame_read_ack(ack))
     {
         return false;
     }
-    //portENABLE_INTERRUPTS();
-    //ESP_DRAM_LOGI(TAG, "tx ack %d", *ack);
     return true;
 }
 
-
-// void IRAM_ATTR test_timer_callback(void* param)
-// {
-//     int* ticks = (int*)param;
-
-//     (*ticks)++;
-// }
+static void cec_line_error_set()
+{
+    ESP_DRAM_LOGE(TAG, "line error");
+    atomic_store(&cec_line_error, true);
+    gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
+    delay_us(CEC_LINE_ERROR_TIME);
+    gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
+}
 
 static esp_err_t cec_frame_transmit(cec_frame_t* frame)
 {
+    if (xPortGetCoreID() != APP_CPU_NUM)
+    {
+        ESP_LOGE(TAG, "cec_frame_transmit can only be called from APP_CPU");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     bool broadcast = frame->dest_addr == CEC_LA_BROADCAST;
 
     if (frame->type != CEC_FRAME_TX ||
@@ -1045,49 +940,34 @@ static esp_err_t cec_frame_transmit(cec_frame_t* frame)
     do
     {
         frame->ack = false;
-        cec_line_wait_free(wait);
 
         portDISABLE_INTERRUPTS();
+        cec_line_wait_free(wait);
 
-        int8_t bit_index = 0;
-        int64_t frame_start = esp_timer_get_time();
-        if (!cec_transmit_start(frame_start))
+        if (!cec_transmit_start())
         {
-            ESP_DRAM_LOGE(TAG, "line error");
-            atomic_store(&cec_line_error, true);
+            cec_line_error_set();
             continue;
         }
         uint8_t addr = (frame->src_addr << 4) | frame->dest_addr;
 
-        if (!cec_frame_transmit_byte(frame_start, &bit_index, addr, frame->data_size == 0, &frame->ack))
+        if (!cec_frame_transmit_byte(addr, frame->data_size == 0, &frame->ack))
         {
-            ESP_DRAM_LOGE(TAG, "line error");
-            
-            atomic_store(&cec_line_error, true);
+            cec_line_error_set();
             continue;
         }
-        //ESP_DRAM_LOGI(TAG, "loop ack %d", frame->ack);
-
         for (int i = 0; CEC_ACK_OK(broadcast, frame->ack) && i < frame->data_size; i++)
         {
-            //bool ack = false;
-            if (!cec_frame_transmit_byte(frame_start, &bit_index, frame->data[i], i == frame->data_size - 1, &frame->ack))
+            if (!cec_frame_transmit_byte(frame->data[i], i == frame->data_size - 1, &frame->ack))
             {
-                ESP_DRAM_LOGE(TAG, "line error");
-                atomic_store(&cec_line_error, true);
+                cec_line_error_set();
                 continue;
             }
-            //frame->ack &= ack;
         }
 
         portENABLE_INTERRUPTS();
         taskYIELD();
 
-        if (!CEC_ACK_OK(broadcast, frame->ack))
-        {
-            ESP_LOGE(TAG, "frame failed");
-        }
-        //frame->ack = ack;
         wait = CEC_WAIT_RETRY;
     }
     while (retry++ < CEC_FRAME_RETRY_MAX && !CEC_ACK_OK(broadcast, frame->ack));
@@ -1120,9 +1000,9 @@ esp_err_t cec_test2()
 
     frame.type = CEC_FRAME_TX;
     frame.src_addr = atomic_load(&cec_log_addr);
-    frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
+    frame.dest_addr = atomic_load(&cec_log_addr);
     frame.data_size = 1;
-    frame.data[0] = 0x83;
+    frame.data[0] = CEC_OP_GIVE_PHYSICAL_ADDRESS;
 
     return cec_frame_queue_add(&frame);
 }
@@ -1135,7 +1015,39 @@ esp_err_t cec_test3()
     frame.src_addr = atomic_load(&cec_log_addr);
     frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
     frame.data_size = 1;
-    frame.data[0] = 0x8f;
+    frame.data[0] = CEC_OP_GIVE_DEVICE_POWER_STATUS;
 
     return cec_frame_queue_add(&frame);
 }
+
+esp_err_t cec_report_physical_address()
+{
+   cec_frame_t frame = { 0 };
+
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = CEC_LA_BROADCAST;
+    frame.data_size = 4;
+    frame.data[0] = CEC_OP_REPORT_PHYSICAL_ADDRESS;
+    frame.data[1] = (cec_phy_addr >> 8) & 0xff;
+    frame.data[2] = cec_phy_addr & 0xff;
+    frame.data[3] = CEC_DT_TUNER;
+
+    return cec_frame_queue_add(&frame);
+}
+
+// esp_err_t cec_report_physical_address_now()
+// {
+//    cec_frame_t frame = { 0 };
+
+//     frame.type = CEC_FRAME_TX;
+//     frame.src_addr = atomic_load(&cec_log_addr);
+//     frame.dest_addr = CEC_LA_BROADCAST;
+//     frame.data_size = 4;
+//     frame.data[0] = CEC_OP_REPORT_PHYSICAL_ADDRESS;
+//     frame.data[1] = (cec_phy_addr >> 8) & 0xff;
+//     frame.data[2] = cec_phy_addr & 0xff;
+//     frame.data[3] = CEC_DT_TUNER;
+
+//     return cec_frame_transmit(&frame);
+// }

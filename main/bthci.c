@@ -395,7 +395,7 @@ BT_PACKET_ENVELOPE* create_hci_write_local_name(const char* local_name)
     BT_PACKET_ENVELOPE* env = create_hci_cmd_packet(HCI_OPCODE_WRITE_LOCAL_NAME, PARAMS_SIZE(HCI_WRITE_LOCAL_NAME_PACKET));
     HCI_WRITE_LOCAL_NAME_PACKET* packet = (HCI_WRITE_LOCAL_NAME_PACKET*)env->packet;
 
-    strncpy((char*)packet->local_name, local_name, HCI_MAX_LOCAL_NAME_SIZE);
+    strncpy((char*)packet->local_name, local_name, HCI_MAX_LOCAL_NAME_SIZE - 1);
 
     return env;
 }
