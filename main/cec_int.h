@@ -44,6 +44,7 @@ cec_bit_t;
 #define CEC_NEXT_START_MIN_TIME         (2050)
 
 #define CEC_FRAME_RETRY_MAX             (5)
+//#define CEC_FRAME_RETRY_MAX             (0)
 
 #define CEC_BIT_TIME_MIN                (1300)
 #define CEC_BIT_TIME_MAX                (2750)
@@ -103,9 +104,9 @@ typedef enum
 static void cec_loop_task(void* param);
 static void cec_ack_timer_callback(void* param);
 
-#if 0
+#ifdef CEC_DEBUG
 static void cec_loop_debug_task(void* param);
-static void cec_loop_debug2(_taskvoid* param);
+static void cec_loop_debug2_task(void* param);
 static void cec_isr_debug(void* param);
 #endif
 
@@ -115,8 +116,8 @@ static bool cec_edid_parse(unsigned char* edid);
 static bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext);
 static void cec_isr(void* param);
 static bool cec_frame_transmit_byte(uint8_t data, bool eom, bool* ack);
-static bool cec_frame_read_ack(bool* ack);
-static bool  cec_frame_transmit_bit(bool bit_value, int bit_wait);
+static bool cec_frame_transmit_ack(bool* ack);
+static bool cec_frame_transmit_bit(bool bit_value);
 static esp_err_t cec_frame_queue_add(cec_frame_t* frame);
 static esp_err_t cec_frame_transmit(cec_frame_t* frame);
 static bool cec_transmit_start();

@@ -1,3 +1,5 @@
+//#define CEC_DEBUG
+
 #include <stdatomic.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,15 +22,18 @@
 #define TAG "cec"
 
 QueueHandle_t cec_frame_queue_handle;
-//QueueHandle_t cec_debug_bit_queue_handle;
-//QueueHandle_t cec_debug_bit_queue2_handle;
+#ifdef CEC_DEBUG
+QueueHandle_t cec_debug_bit_queue_handle;
+QueueHandle_t cec_debug_bit_queue2_handle;
+#endif
 esp_timer_handle_t cec_ack_timer_handle;
 
 atomic_bool cec_line_error;
+atomic_bool cec_ack_set;
 atomic_uchar cec_last_source = CEC_LA_UNREGISTERED;
 atomic_uchar cec_log_addr = CEC_LA_UNREGISTERED;
 uint16_t cec_phy_addr;
-//atomic_int_least64_t cec_last_activity_time_us;
+
 
 const char* CEC_STATE_NAMES[] =
 {
@@ -79,24 +84,33 @@ esp_err_t cec_init()
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
     io_conf.pin_bit_mask = HDMI_CEC_GPIO_2_SEL;
-    io_conf.mode = GPIO_MODE_DISABLE;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_DISABLE; // GPIO_INTR_ANYEDGE
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+#ifdef CEC_DEBUG
+    io_conf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+    io_conf.intr_type = GPIO_INTR_ANYEDGE;
+#else
+    io_conf.mode = GPIO_MODE_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+#endif
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
     cec_frame_queue_handle = xQueueCreate(CEC_FRAME_QUEUE_LENGTH, sizeof(cec_frame_t));
-    //cec_debug_bit_queue_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
-    //cec_debug_bit_queue2_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
+#ifdef CEC_DEBUG
+    cec_debug_bit_queue_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
+    cec_debug_bit_queue2_handle = xQueueCreate(CEC_DEBUG_BIT_QUEUE_LENGTH, sizeof(cec_bit_t));
+#endif
 
     ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_NUM, 1));
     ESP_ERROR_CHECK(gpio_set_level(HDMI_CEC_GPIO_2_NUM, 1));
 
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_EDGE));
     ESP_ERROR_CHECK(gpio_isr_handler_add(HDMI_CEC_GPIO_NUM, cec_isr, NULL));
-    //ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_EDGE));
-    //ESP_ERROR_CHECK(gpio_isr_handler_add(HDMI_CEC_GPIO_2_NUM, cec_isr_debug, NULL));
+
+#ifdef CEC_DEBUG
+    ESP_ERROR_CHECK(gpio_isr_handler_add(HDMI_CEC_GPIO_2_NUM, cec_isr_debug, NULL));
+#endif
 
     esp_timer_create_args_t timer_args = 
     {
@@ -109,13 +123,15 @@ esp_err_t cec_init()
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &cec_ack_timer_handle));
 
     xTaskCreatePinnedToCore(cec_loop_task, "cec_loop", 8000, NULL, 5, NULL, APP_CPU_NUM);
-    //xTaskCreate(cec_loop_debug_task, "cec_loop_debug", 8000, NULL, 5, NULL);
-    //xTaskCreate(cec_loop_debug2_task, "cec_loop_debug2", 8000, NULL, 5, NULL);
+#ifdef CEC_DEBUG
+    xTaskCreate(cec_loop_debug_task, "cec_loop_debug", 8000, NULL, 5, NULL);
+    xTaskCreate(cec_loop_debug2_task, "cec_loop_debug2", 8000, NULL, 5, NULL);
+#endif
 
     return ESP_OK;
 }
 
-#if 0
+#ifdef CEC_DEBUG
 static void IRAM_ATTR cec_isr_debug(void* param)
 {
     static atomic_bool busy = false;
@@ -124,8 +140,7 @@ static void IRAM_ATTR cec_isr_debug(void* param)
 
     if (atomic_load(&busy))
     {
-        ets_printf("cec_isr is not re-entrant\n");
-        esp_restart();
+        ESP_DRAM_LOGE(TAG, "cec_isr is not re-entrant");
         return;
     }
     atomic_store(&busy, true);
@@ -222,7 +237,7 @@ static void IRAM_ATTR cec_isr(void* param)
     atomic_store(&busy, false);
 }
 
-#if 0
+#ifdef CEC_DEBUG
 void cec_loop_debug_task(void* param)
 {
     cec_bit_t bit;
@@ -554,25 +569,30 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
                     cec_state++;
                 }
             }
-            else
+            else if (!debug)
             {
                 if (cec_state == CEC_HEAD_ACK || cec_state == CEC_DATA_ACK)
                 {
                     int8_t la = atomic_load(&cec_log_addr);
-                    int8_t src = cec_state == CEC_DATA_ACK ? frame->src_addr : (block >> 5) & 0xf;
+                    //int8_t src = cec_state == CEC_DATA_ACK ? frame->src_addr : (block >> 5) & 0xf;
                     int8_t dest = cec_state == CEC_DATA_ACK ? frame->dest_addr : (block >> 1) & 0xf;
-                    if (src != dest && la == dest)
+                    if (la == dest)
                     {
                         if (!frame->bit_error)
                         {
-                            gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
+                            atomic_store(&cec_ack_set, true);
+                            gpio_set_level(HDMI_CEC_GPIO_NUM, 0);        
                             esp_err_t result = esp_timer_start_once(cec_ack_timer_handle, CEC_DATA0_TIME);
                             if (result != ESP_OK)
                             {
                                 ESP_DRAM_LOGE(TAG, "ack_timer esp_timer_start_once failed (%s)", esp_err_to_name(result));
                             }
 
-                            //ESP_DRAM_LOGI(TAG, "ack set (%lld us low %lld us) level %d block %02x la %d src %d dest %d", time_us, last_low_time_us, level, block, la, src, dest);
+                            //ESP_DRAM_LOGI(TAG, "ack set (%lld us low %lld us) block %02x la %d src %d dest %d", time_us, last_low_time_us,  block, la, src, dest);
+                        }
+                        else
+                        {
+                            //ESP_DRAM_LOGI(TAG, "ack not set due to bit error (%lld us) block %02x la %d src %d dest %d", time_us, block, la, src, dest);
                         }
                     }
                     else
@@ -845,7 +865,29 @@ static bool cec_transmit_start()
     return true;
 }
 
-static bool  cec_frame_transmit_bit(bool bit_value, int bit_wait)
+static bool  cec_frame_transmit_ack(bool* ack)
+{
+    if (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
+    {
+        return false;
+    }
+
+    int64_t bit_start = esp_timer_get_time();
+    atomic_store(&cec_ack_set, 0);
+    gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
+    delay_us(CEC_DATA1_TIME);
+    if (atomic_load(&cec_ack_set) == 0)
+    {
+        gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
+    }
+    delay_until(bit_start + CEC_BIT_TIME_SAMPLE);
+    *ack = gpio_get_level(HDMI_CEC_GPIO_NUM) == 0;
+    delay_until(bit_start + CEC_BIT_TIME);
+
+    return true;
+}
+
+static bool  cec_frame_transmit_bit(bool bit_value)
 {
     if (gpio_get_level(HDMI_CEC_GPIO_NUM) == 0)
     {
@@ -856,25 +898,10 @@ static bool  cec_frame_transmit_bit(bool bit_value, int bit_wait)
     gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
     delay_us(bit_value ? CEC_DATA1_TIME : CEC_DATA0_TIME);
     gpio_set_level(HDMI_CEC_GPIO_NUM, 1);
-    delay_until(bit_start + bit_wait);
-
-    return true;
-}
-
-static bool cec_frame_read_ack(bool* ack)
-{
-    int64_t bit_start = esp_timer_get_time();
-    if (!cec_frame_transmit_bit(true, CEC_BIT_TIME_SAMPLE))
-    {
-        return false;
-    }
-    *ack = gpio_get_level(HDMI_CEC_GPIO_NUM) == 0;
-
     delay_until(bit_start + CEC_BIT_TIME);
 
     return true;
 }
-
 
 static bool cec_frame_transmit_byte(uint8_t data, bool eom, bool* ack)
 {
@@ -885,17 +912,17 @@ static bool cec_frame_transmit_byte(uint8_t data, bool eom, bool* ack)
     for (int i = 0; i < 8; i++)
     {
         //ESP_LOGI(TAG, "bit shift %d value %d", shift, (data >> shift) & 1);
-        if (!cec_frame_transmit_bit((data >> shift) & 1, CEC_BIT_TIME))
+        if (!cec_frame_transmit_bit((data >> shift) & 1))
         {
             return false;
         }
         shift--;
     }
-    if (!cec_frame_transmit_bit(eom, CEC_BIT_TIME))
+    if (!cec_frame_transmit_bit(eom))
     {
         return false;
     }
-    if (!cec_frame_read_ack(ack))
+    if (!cec_frame_transmit_ack(ack))
     {
         return false;
     }
@@ -979,8 +1006,8 @@ esp_err_t cec_test()
     cec_frame_t frame = { 0 };
 
     frame.type = CEC_FRAME_TX;
-    frame.src_addr = CEC_LA_TUNER_1;
-    frame.dest_addr = CEC_LA_TUNER_1;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = frame.src_addr;
     frame.data_size = 0;
 
     return cec_frame_queue_add(&frame);
@@ -1005,6 +1032,7 @@ esp_err_t cec_test3()
 
     frame.type = CEC_FRAME_TX;
     frame.src_addr = atomic_load(&cec_log_addr);
+    //frame.dest_addr = frame.src_addr;
     frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
     frame.data_size = 1;
     frame.data[0] = CEC_OP_GIVE_DEVICE_POWER_STATUS;
