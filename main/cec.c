@@ -425,7 +425,7 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
                 else
                 {
                     if (debug) ESP_LOGE(TAG, "bad start1 bit %llu", time_us);
-                    else ESP_DRAM_LOGE(TAG, "bad start1 bit %llu", time_us);
+                    //else ESP_DRAM_LOGE(TAG, "bad start1 bit %llu", time_us);
                 }
             }
             break;
@@ -439,7 +439,7 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
             else
             {
                 if (debug) ESP_LOGE(TAG, "bad start bit %llu", last_low_time_us + time_us);
-                else ESP_DRAM_LOGE(TAG, "bad start bit %llu", last_low_time_us + time_us);
+                //else ESP_DRAM_LOGE(TAG, "bad start bit %llu", last_low_time_us + time_us);
                 cec_state = CEC_IDLE;
             }
             break;
@@ -484,19 +484,9 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
                 }
                 else
                 {
-
                     if (debug) ESP_LOGE(TAG, "%s bit low error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
-                    else ESP_DRAM_LOGE(TAG, "%s bit low error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
+                    //else ESP_DRAM_LOGE(TAG, "%s bit low error time %llu us last_low %llu us", CEC_STATE_NAMES[cec_state], time_us, last_low_time_us);
 
-                    // gpio_set_level(HDMI_CEC_GPIO_NUM, 0);
-                    // esp_err_t result = esp_timer_start_once(cec_ack_timer_handle, CEC_START_TIME);
-                    // if (result != ESP_OK)
-                    // {
-                    //     ESP_DRAM_LOGE(TAG, "ack_timer esp_timer_start_once failed (%s)", esp_err_to_name(result));
-                    // }
-
-                    // cec_state = CEC_IDLE;
-                    // memset(frame, 0, sizeof(cec_frame_t));
                     frame->bit_error = true;
                 }
 
@@ -568,7 +558,6 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
             {
                 if (cec_state == CEC_HEAD_ACK || cec_state == CEC_DATA_ACK)
                 {
-                    //int8_t level = gpio_get_level(HDMI_CEC_GPIO_NUM);
                     int8_t la = atomic_load(&cec_log_addr);
                     int8_t src = cec_state == CEC_DATA_ACK ? frame->src_addr : (block >> 5) & 0xf;
                     int8_t dest = cec_state == CEC_DATA_ACK ? frame->dest_addr : (block >> 1) & 0xf;
@@ -588,7 +577,7 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
                     }
                     else
                     {
-                        //ESP_DRAM_LOGI(TAG, "ack not set (%lld us) level %d block %02x la %d src %d dest %d", time_us, level, block, la, src, dest);
+                        //ESP_DRAM_LOGI(TAG, "ack not set (%lld us) block %02x la %d src %d dest %d", time_us, block, la, src, dest);
                     }
                 }
 
@@ -816,12 +805,15 @@ static void cec_frame_handle(const cec_frame_t* frame, bool debug)
     {
         return;
     }
-    
-    switch (frame->data[0])
+  
+    if (frame->dest_addr == atomic_load(&cec_log_addr) || frame->dest_addr == CEC_LA_BROADCAST)
     {
-        case CEC_OP_GIVE_PHYSICAL_ADDRESS:
-            cec_report_physical_address();
-            break;
+        switch (frame->data[0])
+        {
+            case CEC_OP_GIVE_PHYSICAL_ADDRESS:
+                cec_report_physical_address();
+                break;
+        }
     }
 }
 
@@ -1000,7 +992,7 @@ esp_err_t cec_test2()
 
     frame.type = CEC_FRAME_TX;
     frame.src_addr = atomic_load(&cec_log_addr);
-    frame.dest_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = CEC_LA_TV;
     frame.data_size = 1;
     frame.data[0] = CEC_OP_GIVE_PHYSICAL_ADDRESS;
 
