@@ -204,7 +204,7 @@ esp_err_t webserver_tv_pause_get(httpd_req_t* request)
 {
     cJSON* response_doc = cJSON_CreateObject();
 
-    cec_pause();
+    cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_PAUSE);
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
 
@@ -217,7 +217,7 @@ esp_err_t webserver_tv_play_get(httpd_req_t* request)
 {
     cJSON* response_doc = cJSON_CreateObject();
 
-    cec_play();
+    cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_PLAY);
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
 
@@ -507,7 +507,7 @@ esp_err_t webserver_cec_log_get(httpd_req_t* request)
 {
     httpd_resp_set_type(request, "text/plain");
     
-    tvmux_cec_log_write(request);
+    cec_log_write(request);
 
     size_t qs_size = httpd_req_get_url_query_len(request) + 1;
     char* qs = (char*)malloc(qs_size);
@@ -537,7 +537,7 @@ esp_err_t webserver_cec_log_get(httpd_req_t* request)
 
     if (clear)
     {
-        tvmux_cec_log_clear();
+        cec_log_clear();
     }    
 
     return ESP_OK;
@@ -602,21 +602,20 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
         cmd[i] = (unsigned char)temp;
     }
 
-    int reply_filter = -1;
+    cec_op_code_t reply_op_code = CEC_OP_ABORT;
     if (has_reply)
     {
         hex = reply_cmd_string;
-        sscanf(hex, "%02x", &reply_filter);
+        sscanf(hex, "%02x", &reply_op_code);
     }
 
-    //std::string reply_string;
     char reply_string[CEC_FRAME_SIZE_MAX * 3 + 1] = { };
     const char* status = "ok";
 
     if (has_reply)
     {
         int reply_size = CEC_FRAME_SIZE_MAX;
-        if (tvmux_cec_control(addr, cmd, len, (uint8_t)reply_filter, reply, &reply_size) == ESP_OK)
+        if (cec_control(addr, cmd, len, reply_op_code, reply, &reply_size) == ESP_OK)
         {
             format_bytes(reply_string, sizeof(reply_string), reply + 1, reply_size - 1);
         }
@@ -627,7 +626,7 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
     }
     else
     {
-        if (tvmux_cec_control(addr, cmd, len, 0, NULL, NULL) != ESP_OK)
+        if (cec_control(addr, cmd, len, 0, NULL, NULL) != ESP_OK)
         {
             status = "error2";
         }

@@ -37,11 +37,6 @@ esp_err_t tvmux_init(bool* setup_enabled)
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
     
-    //cec_init();
-    
-    // FIXME
-    //xTaskCreate(tvmux_hdmi_task, "hdmi", 2000, NULL, 1, NULL);
-
     *setup_enabled = gpio_get_level(TVMUX_SETUP_GPIO_NUM) == TVMUX_SETUP_ENABLED;
 
     tvmux_retry_sem = xSemaphoreCreateBinary();
@@ -77,7 +72,7 @@ bool tvmux_call_with_retry(tvmux_retry_type_t retry_type, tvmux_retry_func_t f, 
         f(retry_param);
         vTaskDelay(TVMUX_RETRY_CHECK_WAIT_MS / portTICK_PERIOD_MS);
         success = check(retry_param);
-        //cec_queue_clear();
+        cec_queue_clear();
     } while (retry++ < TVMUX_RETRY_MAX && !success);
 
     xSemaphoreGive(tvmux_retry_sem);
@@ -109,17 +104,6 @@ bool check_retry_busy(tvmux_retry_type_t func)
 
 bool tvmux_steam_power_on()
 {
-    // for (int i = 0; i < 10; i++)
-    // {
-    //     if (tvmux_steam_is_on())
-    //     {
-    //         return true;
-    //     }
-    //     printf("send WOL (%d)\n", i + 1);
-    //     //WOL.sendMagicPacket(TVMUX_STEAM_PC_MAC);
-    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // }
-
     send_WOL(TVMUX_STEAM_MAC, 10, 1000);
 
     return false;
@@ -149,26 +133,6 @@ bool tvmux_steam_get(const char* path)
 
 void tvmux_steam_start()
 {
-    // HTTPClient http;
-
-    // String host(STEAM_PC_HOSTNAME);
-    // uint16_t port = TVMUX_STEAM_PC_PORT;
-    // String path("/api/steam/bigpicture/start");
-   
-    // int http_code;
-    // http.setTimeout(30000);
-    // http.begin(host, port, path);
-    // if (HTTP_SUCCESS(http_code = http.GET()))
-    // {
-    //     auto json = http.getString();
-    //     ESP_LOGI(TAG, "%s: %s", path.c_str(), json.c_str());      
-    // }
-    // else
-    // {
-    //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
-    // }
-    // http.end();
-
     if (tvmux_steam_get("/api/steam/bigpicture/start"))
     {
         ESP_LOGI(TAG, "tvmux_steam_start succeeded");
@@ -180,27 +144,7 @@ void tvmux_steam_start()
 }
 
 void tvmux_steam_close()
-{
-    // HTTPClient http;
-
-    // String host(STEAM_PC_HOSTNAME);
-    // uint16_t port = STEAM_PC_PORT;
-    // String path("/api/steam/close");
-   
-    // int http_code;
-    // http.setTimeout(30000);
-    // http.begin(host, port, path);
-    // if (HTTP_SUCCESS(http_code = http.GET()))
-    // {
-    //     auto json = http.getString();
-    //     ESP_LOGI(TAG, "%s: %s", path.c_str(), json.c_str());      
-    // }
-    // else
-    // {
-    //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
-    // }
-    // http.end();
-    
+{  
     if (tvmux_steam_get("/api/steam/close"))
     {
         ESP_LOGE(TAG, "tvmux_steam_close succeeded");
@@ -213,25 +157,6 @@ void tvmux_steam_close()
 
 void steam_power_off()
 {
-    // HTTPClient http;
-
-    // String host(STEAM_PC_HOSTNAME);
-    // uint16_t port = STEAM_PC_PORT;
-    // String path("/api/computer/off");
-   
-    // int http_code;
-    // http.setTimeout(30000);
-    // http.begin(host, port, path);
-    // if (HTTP_SUCCESS(http_code = http.GET()))
-    // {
-    //     auto json = http.getString();
-    //     ESP_LOGI(TAG, "%s: %s", path.c_str(), json.c_str());      
-    // }
-    // else
-    // {
-    //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
-    // }
-    // http.end();
     if (tvmux_steam_get("/api/computer/off"))
     {
         ESP_LOGE(TAG, "steam_power_off succeeded");
@@ -242,45 +167,9 @@ void steam_power_off()
     }   
 }
 
-bool check_steam_topology()
+bool tvmux_steam_topology_check()
 {
     bool external = false;
-
-    // HTTPClient http;
-
-    // String host(STEAM_PC_HOSTNAME);
-    // uint16_t port = STEAM_PC_PORT;
-    // String path("/api/monitor/topology");
-   
-    // http.setTimeout(30000);
-    // http.begin(host, port, path);
-    // int http_code;
-    // if (HTTP_SUCCESS(http_code = http.GET()))
-    // {
-    //     auto json = http.getString();
-    //     cJSON* doc = cJSON_Parse(json.c_str());
-    //     if (doc != NULL)
-    //     {
-    //         auto topology_prop = cJSON_GetObjectItem(doc, "topology");
-    //         if (topology_prop != NULL)
-    //         {
-    //             auto topology_value = cJSON_GetStringValue(topology_prop);
-    //             if (topology_value != NULL)
-    //             {
-    //                 external = strcasecmp(topology_value, "External") == 0;
-    //                 ESP_LOGI(TAG, "topology: %s", topology_value);
-    //             }
-    //         }
-    //         cJSON_Delete(doc);
-    //     }
-    // }
-    // else
-    // {
-    //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
-    // }
-    // http.end();
-
-    // return external;
 
     cJSON* json = tvmux_steam_get_json("/api/monitor/topology");
     if (json != NULL)
@@ -299,7 +188,7 @@ bool check_steam_topology()
     }
     else
     {
-        ESP_LOGE(TAG, "check_steam_topology failed");
+        ESP_LOGE(TAG, "tvmux_steam_topology_check failed");
     }
 
     return external;
@@ -314,42 +203,6 @@ bool tvmux_steam_is_on()
 bool tvmux_steam_is_open()
 {
     bool open = false;
-
-    // HTTPClient http;
-
-    // String host(STEAM_PC_HOSTNAME);
-    // uint16_t port = STEAM_PC_PORT;
-    // String path("/api/steam/status");
-   
-    // http.setTimeout(30000);
-    // http.begin(host, port, path);
-    // int http_code;
-    // if (HTTP_SUCCESS(http_code = http.GET()))
-    // {
-    //     auto json = http.getString();
-    //     cJSON* doc = cJSON_Parse(json.c_str());
-    //     if (doc != NULL)
-    //     {
-    //         auto status_prop = cJSON_GetObjectItem(doc, "steamStatus");
-    //         if (status_prop != NULL)
-    //         {
-    //             auto status_value = cJSON_GetStringValue(status_prop);
-    //             if (status_value != NULL)
-    //             {
-    //                 open = strcasecmp(status_value, "Open") == 0;
-    //                 ESP_LOGI(TAG, "open: %s", status_value);
-    //             }
-    //         }
-    //         cJSON_Delete(doc);
-    //     }
-    // }
-    // else
-    // {
-    //     ESP_LOGE(TAG, "%s: http %d %s", path.c_str(), http_code, http.errorToString(http_code).c_str());
-    // }
-    // http.end();
-
-    // return open;
 
     cJSON* json = tvmux_steam_get_json("/api/steam/status");
     if (json != NULL)
@@ -393,7 +246,7 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
         }
     }
 
-    cec_combine_devices_state(state, and_mode, true, true, false);
+    tvmux_combine_devices_state(state, and_mode, true, true, false);
 
     ESP_LOGI(TAG, "steam status start %d", *state);
 
@@ -407,7 +260,7 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
         }
         if (state)
         {
-            *state &= check_steam_topology();
+            *state &= tvmux_steam_topology_check();
             ESP_LOGI(TAG, "steam status topology %d", *state);            
         }
         if (state)
@@ -437,15 +290,53 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
     return ESP_OK;
 }
 
-esp_err_t tvmux_steam_power(bool power_on)
+void wii_state_set(void* retry_param)
 {
-    taskENTER_CRITICAL(&tvmux_mux);
-    tvmux_steam_on_pending = power_on;
-    taskEXIT_CRITICAL(&tvmux_mux);
+    bool desired_state = (bool)retry_param;
 
-    xTaskCreate(tvmux_steam_state_task, "steam_state", 4000, (void*)power_on, 1, NULL);
+    if (desired_state)
+    {
+        wii_power_on();
+        uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_WII_HDMI_INPUT << 8;
 
-    return ESP_OK;
+        cec_active_source(addr);
+        cec_image_view_on(CEC_LA_TV);
+        cec_system_audio_mode_request(addr);
+    }
+    else
+    {
+        wii_power_off();
+        cec_standby();
+    }
+}
+
+bool wii_state_check(void* retry_param)
+{
+    bool desired_av_state = (bool)retry_param;
+
+    wii_power_state_t desired_wii_state = desired_av_state ? WII_POWER_STATE_ON : WII_POWER_STATE_OFF;
+
+    bool state;
+    return wii_query_power_state() == desired_wii_state &&
+        tvmux_combine_devices_state(&state, desired_av_state, true, true, false) == ESP_OK && state == desired_av_state;
+}
+
+void wii_state_task(void* param)
+{
+    bool desired_state = (bool)param;
+
+    ESP_LOGI(TAG, "set_wii_state = %u requested", desired_state);
+
+    if (tvmux_call_with_retry(WII_RETRY_FUNC, wii_state_set, wii_state_check, (void*)desired_state))
+    {
+        ESP_LOGI(TAG, "set_wii_state = %u succeeded", desired_state);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "set_wii_state = %u failed", desired_state);
+    }
+
+    vTaskDelete(NULL);
 }
 
 esp_err_t tvmux_wii_power(bool power_on)
@@ -454,7 +345,7 @@ esp_err_t tvmux_wii_power(bool power_on)
     tvmux_wii_on_pending = power_on;
     taskEXIT_CRITICAL(&tvmux_mux);
 
-    cec_wii_power(power_on);
+    xTaskCreate(wii_state_task, "wii_state", 4000, (void*)power_on, 1, NULL);
 
     return ESP_OK;
 }
@@ -469,13 +360,6 @@ esp_err_t tvmux_cec_log_write(httpd_req_t* request)
 esp_err_t tvmux_cec_log_clear()
 {
     cec_log_clear();
-
-    return ESP_OK;
-}
-
-esp_err_t tvmux_cec_control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size)
-{
-    cec_control(target_address, request, request_size, reply_filter, reply, reply_size);
 
     return ESP_OK;
 }
@@ -500,7 +384,7 @@ esp_err_t tvmux_tv_state_get(bool* tv_state, bool* pending)
     }
     else
     {
-        ESP_RETURN_ON_ERROR(cec_combine_devices_state(tv_state, false, true, true, true), TAG, "%s/tvmux_combine_devices_state failed (%s)", __func__, esp_err_to_name(err_rc_));
+        ESP_RETURN_ON_ERROR(tvmux_combine_devices_state(tv_state, false, true, true, true), TAG, "%s/tvmux_combine_devices_state failed (%s)", __func__, esp_err_to_name(err_rc_));
     }
 
     return ESP_OK;
@@ -535,9 +419,9 @@ void tvmux_steam_state_set(void* retry_param)
     {
         uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_STEAM_HDMI_INPUT << 8;
 
-        cec_as_set(addr);
-        cec_sam_request(addr);
-        cec_tv_on();
+        cec_active_source(addr);
+        cec_system_audio_mode_request(addr);
+        cec_image_view_on(CEC_LA_TV);
 
         ESP_LOGI(TAG, "checking steam pc...");
         if (!tvmux_steam_is_on())
@@ -588,11 +472,113 @@ void tvmux_steam_state_task(void* param)
     vTaskDelete(NULL);
 }
 
+esp_err_t tvmux_steam_power(bool power_on)
+{
+    taskENTER_CRITICAL(&tvmux_mux);
+    tvmux_steam_on_pending = power_on;
+    taskEXIT_CRITICAL(&tvmux_mux);
+
+    xTaskCreate(tvmux_steam_state_task, "steam_state", 4000, (void*)power_on, 1, NULL);
+
+    return ESP_OK;
+}
+
+void tvmux_tv_state_set(void* retry_param)
+{
+    bool desired_state = (bool)retry_param;
+
+    if (desired_state)
+    {
+        uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_ATV_HDMI_INPUT << 8;
+        cec_active_source(addr);
+        cec_image_view_on(CEC_LA_TV);
+        cec_system_audio_mode_request(addr);
+        cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_POWER_ON_FUNCTION);
+    }
+    else
+    {
+        cec_standby();
+    }
+}
+
+bool tvmux_tv_state_check(void* retry_param)
+{
+    bool desired_state = (bool)retry_param;
+
+    bool state;
+    return tvmux_combine_devices_state(&state, desired_state, true, true, true) == ESP_OK && state == desired_state;
+}
+
+void tvmux_tv_state_task(void* param)
+{
+    bool desired_state = (bool)param;
+
+    ESP_LOGI(TAG, "set_tv_state = %u requested", desired_state);
+
+    if (tvmux_call_with_retry(TV_RETRY_FUNC, tvmux_tv_state_set, tvmux_tv_state_check, (void*)desired_state))
+    {
+        ESP_LOGI(TAG, "set_tv_state = %u succeeded", desired_state);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "set_tv_state = %u failed", desired_state);
+    }
+
+    vTaskDelete(NULL);
+}
+
 esp_err_t tvmux_tv_power(bool power_on)
 {
     taskENTER_CRITICAL(&tvmux_mux);
     tvmux_tv_on_pending = power_on;
     taskEXIT_CRITICAL(&tvmux_mux);
 
-    return cec_tv_power(power_on);
+    xTaskCreate(tvmux_tv_state_task, "tv_state", 4000, (void*)power_on, 1, NULL);
+
+    return ESP_OK;
+}
+
+esp_err_t tvmux_device_check(bool and_mode, cec_logical_address_t log_addr, bool* combined_on, const char* name)
+{
+    cec_power_status_t power_status;
+
+    esp_err_t result = cec_power_status(log_addr, &power_status);
+    if (result != ESP_OK) return result;
+
+    bool device_on = power_status == CEC_PS_ON || power_status == CEC_PS_TRANS_ON;            
+
+    if (and_mode)
+    {
+        *combined_on &= device_on;
+    }
+    else
+    {
+        *combined_on |= device_on;
+    }
+
+    ESP_LOGI(TAG, "%s is %s, all combined is %s", name, device_on ? "on" : "off", *combined_on ? "on" : "off");
+
+    return ESP_OK;
+}
+
+esp_err_t tvmux_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv)
+{
+    bool combined_on = and_mode;
+
+    if (tv)
+    {
+        tvmux_device_check(and_mode, CEC_LA_TV, &combined_on, "tv");
+    }
+    if (audio)
+    {
+        tvmux_device_check(and_mode, CEC_LA_AUDIO_SYSTEM, &combined_on, "audio");
+    }
+    if (atv)
+    {
+        tvmux_device_check(and_mode, CEC_LA_PLAYBACK_DEVICE_1, &combined_on, "atv");
+    }
+
+    *state = combined_on;
+
+    return ESP_OK;
 }

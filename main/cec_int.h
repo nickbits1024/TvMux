@@ -9,15 +9,8 @@
 #define CEC_DEVICE_TYPE                 CEC_Device::CDT_TUNER
 #define CEC_MAX_LOG_ENTRIES             256
 
-#define CEC_SET_ACTIVE_SOURCE           0x82
-#define CEC_USER_CONTROL_PLAY           0x60
-#define CEC_USER_CONTROL_PAUSE          0x61
-#define CEC_USER_CONTROL_POWER_ON       0x6d 
-#define CEC_USER_CONTROL_POWER_OFF      0x6c
-#define CEC_POWER_STATUS                0x90
-
-#define CEC_REQUEST_WAIT                5000
-#define CEC_RESPONSE_WAIT               1000
+#define CEC_CONTROL_REQUEST_TIMEOUT     (5000)
+#define CEC_CONTROL_RESPONSE_TIMEOUT    (2000)
 
 typedef struct
 {
@@ -27,6 +20,13 @@ typedef struct
     int64_t last_low_time;
 }
 cec_bit_t;
+
+typedef struct cec_log_entry_s
+{
+    cec_frame_t frame;
+    struct cec_log_entry_s* next;
+} 
+cec_log_entry_t;
 
 #define CEC_FRAME_QUEUE_LENGTH          (100)
 #define CEC_DEBUG_BIT_QUEUE_LENGTH      (1000)
@@ -99,7 +99,8 @@ typedef enum
     CEC_DATA_EOM,
     CEC_DATA_ACK,
     CEC_STATE_END
-} cec_state_t;
+}
+cec_state_t;
 
 static void cec_loop_task(void* param);
 static void cec_ack_timer_callback(void* param);

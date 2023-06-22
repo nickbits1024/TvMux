@@ -1,5 +1,7 @@
 //#define CEC_DEBUG
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdatomic.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,6 +36,19 @@ atomic_uchar cec_last_source = CEC_LA_UNREGISTERED;
 atomic_uchar cec_log_addr = CEC_LA_UNREGISTERED;
 uint16_t cec_phy_addr;
 
+
+portMUX_TYPE cec_log_mux = portMUX_INITIALIZER_UNLOCKED;
+cec_log_entry_t* cec_log_head;
+cec_log_entry_t* cec_log_tail;
+int cec_log_size;
+
+SemaphoreHandle_t cec_control_request_sem;
+SemaphoreHandle_t cec_control_response_sem;
+portMUX_TYPE cec_control_response_mux = portMUX_INITIALIZER_UNLOCKED;
+
+cec_logical_address_t cec_control_reply_from;
+uint8_t cec_control_reply[CEC_FRAME_SIZE_MAX];
+int cec_control_reply_size;
 
 const char* CEC_STATE_NAMES[] =
 {
@@ -121,6 +136,12 @@ esp_err_t cec_init()
     };
 
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &cec_ack_timer_handle));
+
+
+    cec_control_request_sem = xSemaphoreCreateBinary();
+    xSemaphoreGive(cec_control_request_sem);
+    cec_control_response_sem = xSemaphoreCreateBinary();
+    //xSemaphoreGive(cec_control_response_sem);
 
     xTaskCreatePinnedToCore(cec_loop_task, "cec_loop", 8000, NULL, 5, NULL, APP_CPU_NUM);
 #ifdef CEC_DEBUG
@@ -301,11 +322,11 @@ void cec_loop_debug2_task(void* param)
 }
 #endif
 
-void cec_report_physical_address_task(void* param)
-{
-    cec_report_physical_address();
-    vTaskDelete(NULL);
-}
+// void cec_report_physical_address_task(void* param)
+// {
+//     cec_report_physical_address();
+//     vTaskDelete(NULL);
+// }
 
 void cec_loop_task(void* param)
 {
@@ -612,78 +633,210 @@ static bool IRAM_ATTR cec_bit_handle(cec_frame_t* frame, bool low, int64_t time_
 
 esp_err_t cec_queue_clear()
 {
+    xQueueReset(cec_frame_queue_handle);
 
     return ESP_OK;
 }
 
 esp_err_t cec_standby()
 {
+    cec_frame_t frame = { 0 };
 
-    return ESP_OK;
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = CEC_LA_BROADCAST;
+    frame.data_size = 1;
+    frame.data[0] = CEC_OP_STANDBY;
+
+    return cec_frame_queue_add(&frame);
 }
 
-esp_err_t cec_pause()
+esp_err_t cec_user_control_pressed(cec_logical_address_t log_addr, cec_user_control_code_t ucc)
 {
+    cec_frame_t frame = { 0 };
 
-    return ESP_OK;
-}
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = log_addr;
+    frame.data_size = 3;
+    frame.data[0] = CEC_OP_USER_CONTROL_PRESSED;
+    frame.data[1] = ucc;
 
-esp_err_t cec_play()
-{
-
-    return ESP_OK;
-}
-
-esp_err_t cec_tv_power(bool power_on)
-{
-
-    return ESP_OK;
-}
-
-esp_err_t cec_wii_power(bool power_on)
-{
+    return cec_frame_queue_add(&frame);
 
     return ESP_OK;
 }
 
 esp_err_t cec_log_write(httpd_req_t* request)
 {
+    taskENTER_CRITICAL(&cec_log_mux);
+
+    char buf[32];
+
+    cec_log_entry_t* entry = cec_log_head;
+    while (entry != NULL)
+    {
+        snprintf(buf, sizeof(buf), "%cx:", entry->frame.type == CEC_FRAME_RX ? 'r' : entry->frame.type == CEC_FRAME_TX ? 't' : 'u');
+        httpd_resp_send_chunk(request, buf, 3);
+
+        for (int i = 0; i < entry->frame.data_size; i++)
+        {
+            snprintf(buf, sizeof(buf), "%s%02x", i == 0 ? " " : ":", entry->frame.data[i]);
+            httpd_resp_send_chunk(request, buf, 3);
+        }
+
+        if (!entry->frame.ack)
+        {
+            httpd_resp_send_chunk(request, " !", 2);
+        }
+        httpd_resp_send_chunk(request, "\n", 1);
+
+        entry = entry->next;
+    }
+
+    taskEXIT_CRITICAL(&cec_log_mux);
+
+    httpd_resp_send_chunk(request, "END", 3);
+    httpd_resp_send_chunk(request, NULL, 0);
 
     return ESP_OK;
 }
 
 esp_err_t cec_log_clear()
 {
+    taskENTER_CRITICAL(&cec_log_mux);
+
+    cec_log_entry_t* entry = cec_log_head;
+    while (entry != NULL)
+    {
+        cec_log_entry_t* next = entry->next;
+        free(entry);
+        entry = next;
+    }
+    cec_log_size = 0;
+    taskEXIT_CRITICAL(&cec_log_mux);
 
     return ESP_OK;
 }
 
-esp_err_t cec_control(int target_address, const uint8_t* request, int request_size, uint8_t reply_filter, uint8_t* reply, int* reply_size)
+esp_err_t cec_control(cec_logical_address_t addr, const uint8_t* request, int request_size, cec_op_code_t reply_op_code, uint8_t* reply, int* reply_size)
 {
+    if ((reply == NULL && reply_size != NULL) || (reply_size != NULL && *reply_size < CEC_FRAME_SIZE_MAX))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    return ESP_OK;
+    if (!xSemaphoreTake(cec_control_request_sem, CEC_CONTROL_REQUEST_TIMEOUT / portTICK_PERIOD_MS))
+    {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    taskENTER_CRITICAL(&cec_control_response_mux);
+    xSemaphoreTake(cec_control_response_sem, 0);
+    cec_control_reply_from = addr;
+    cec_control_reply_size = 1;
+    cec_control_reply[0] = reply_op_code;
+    taskEXIT_CRITICAL(&cec_control_response_mux);
+
+    cec_frame_t frame = { 0 };
+
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = addr;
+    frame.data_size = request_size;
+    memcpy(&frame.data, request, request_size);
+
+    esp_err_t result = cec_frame_queue_add(&frame);
+    if (result != ESP_OK) return result;
+
+    ESP_LOGI(TAG, "wait %02x", reply_op_code);
+
+    if (xSemaphoreTake(cec_control_response_sem, CEC_CONTROL_RESPONSE_TIMEOUT / portTICK_PERIOD_MS))
+    {
+        if (reply_size != NULL)
+        {
+            *reply_size = cec_control_reply_size;
+        }
+        if (reply != NULL)
+        {
+            memcpy(reply, cec_control_reply, cec_control_reply_size);
+        }
+    }
+    else
+    {
+        result = ESP_FAIL;
+    }
+
+    taskENTER_CRITICAL(&cec_control_response_mux);
+    cec_control_reply_size = 0;
+    taskEXIT_CRITICAL(&cec_control_response_mux);
+
+    xSemaphoreGive(cec_control_request_sem);
+
+    return result;
 }
 
-esp_err_t cec_sam_request(uint16_t addr)
+esp_err_t cec_system_audio_mode_request(uint16_t phy_addr)
 {
+    uint8_t request[3];
+    uint8_t reply[2];
+    int reply_size = sizeof(reply);
 
-    return ESP_OK;
+    request[0] = CEC_OP_SYSTEM_AUDIO_MODE_REQUEST;
+    request[1] = (phy_addr >> 8) & 0xff;
+    request[2] = phy_addr & 0xff;
+
+    esp_err_t result = cec_control(CEC_LA_AUDIO_SYSTEM, request, sizeof(request), CEC_OP_SET_SYSTEM_AUDIO_MODE, reply, &reply_size);
+    if (result != ESP_OK) return result;
+
+    return reply_size == 2 && reply[1] == 0x01 ? ESP_OK : ESP_FAIL;
 }
 
-esp_err_t cec_as_set(uint16_t addr)
+esp_err_t cec_active_source(cec_logical_address_t log_addr)
 {
+    cec_frame_t frame = { 0 };
 
-    return ESP_OK;
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = CEC_LA_BROADCAST;
+    frame.data_size = 3;
+    frame.data[0] = CEC_OP_ACTIVE_SOURCE;
+    frame.data[1] = (log_addr >> 8) & 0xff;
+    frame.data[2] = log_addr & 0xff;
+
+    return cec_frame_queue_add(&frame);
 }
 
-esp_err_t cec_tv_on()
+esp_err_t cec_image_view_on(cec_logical_address_t addr)
 {
+    cec_frame_t frame = { 0 };
 
-    return ESP_OK;
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = addr;
+    frame.data_size = 3;
+    frame.data[0] = CEC_OP_IMAGE_VIEW_ON;
+    frame.data[1] = (addr >> 8) & 0xff;
+    frame.data[2] = addr & 0xff;
+
+    return cec_frame_queue_add(&frame);
 }
 
-esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv)
+esp_err_t cec_power_status(cec_logical_address_t log_addr, cec_power_status_t* power_status)
 {
+    uint8_t request[3];
+    uint8_t reply[2];
+    int reply_size = sizeof(reply);
+
+    *power_status = CEC_PS_UNKNOWN;
+
+    request[0] = CEC_OP_GIVE_DEVICE_POWER_STATUS;
+
+    esp_err_t result = cec_control(log_addr, request, sizeof(request), CEC_OP_REPORT_POWER_STATUS, reply, &reply_size);
+    if (result != ESP_OK) return result;
+    if (reply_size != 3) return ESP_FAIL;
+
+    *power_status = reply[2];
 
     return ESP_OK;
 }
@@ -794,7 +947,6 @@ bool cec_edid_extension_parse(uint8_t* edid2, uint8_t* ext)
                     uint8_t a3 = cec_phy_addr & 0xf;
 
                     ESP_LOGI(TAG, "CEC Physical Address: %u.%u.%u.%u", a0, a1, a2, a3);
-                    // TODO save and respond to cec inq
                 }
                 break;
             }
@@ -820,6 +972,48 @@ static void cec_frame_handle(const cec_frame_t* frame, bool debug)
     ESP_LOGI(TAG, "%s%s (%d) %01x%01x%s %s%s", frame->type == CEC_FRAME_RX ? "rx" : "tx", debug ? "d" : "", 
         1 + frame->data_size, frame->src_addr, frame->dest_addr, data_string, 
         CEC_ACK_OK(frame->dest_addr == CEC_LA_BROADCAST, frame->ack) ? "" : "!", frame->bit_error ? "*" : "");
+
+    taskENTER_CRITICAL(&cec_log_mux);
+    cec_log_entry_t* entry = calloc(1, sizeof(cec_log_entry_t));
+    memcpy(&entry->frame, frame, sizeof(cec_frame_t));
+    if (cec_log_size >= CEC_MAX_LOG_ENTRIES)
+    {
+        cec_log_entry_t* old_head = cec_log_head;
+        cec_log_head = old_head->next;
+        if (cec_log_tail == old_head)
+        {
+            cec_log_tail = cec_log_head;
+        }
+        free(old_head);
+        cec_log_size--;
+    }
+    if (cec_log_tail != NULL)
+    {
+        cec_log_tail->next = entry;
+    }
+    else
+    {            
+        cec_log_head = entry;
+        cec_log_tail = entry;
+    }
+    cec_log_size++;
+    taskEXIT_CRITICAL(&cec_log_mux);
+
+    taskENTER_CRITICAL(&cec_control_response_mux);
+    if (cec_control_reply_size == 1)
+    {
+        if (CEC_ACK_OK(frame->dest_addr == CEC_LA_BROADCAST, frame->ack) &&
+            (cec_control_reply_from == CEC_LA_BROADCAST || cec_control_reply_from == frame->dest_addr) &&
+            frame->data_size >= 1 && 
+            frame->data[0] == cec_control_reply[0])
+        {
+            memcpy(cec_control_reply, frame->data, frame->data_size);
+            cec_control_reply_size = frame->data_size;
+
+            xSemaphoreGive(cec_control_response_sem);
+        }
+    }
+    taskEXIT_CRITICAL(&cec_control_response_mux);
 
     if (frame->data_size == 0)
     {
@@ -1042,7 +1236,7 @@ esp_err_t cec_test3()
 
 esp_err_t cec_report_physical_address()
 {
-   cec_frame_t frame = { 0 };
+    cec_frame_t frame = { 0 };
 
     frame.type = CEC_FRAME_TX;
     frame.src_addr = atomic_load(&cec_log_addr);
