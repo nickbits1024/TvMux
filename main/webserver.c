@@ -506,34 +506,40 @@ esp_err_t webserver_cec_test3_get(httpd_req_t* request)
 esp_err_t webserver_cec_log_get(httpd_req_t* request)
 {
     httpd_resp_set_type(request, "text/plain");
-    
-    cec_log_write(request);
 
-    size_t qs_size = httpd_req_get_url_query_len(request) + 1;
-    char* qs = (char*)malloc(qs_size);
-
-    if (qs == NULL)
-    {
-        httpd_resp_send_500(request);
-        return ESP_FAIL;
-    }
-
-    if (httpd_req_get_url_query_str(request, qs, qs_size) != ESP_OK)
-    {
-        free(qs);
-        httpd_resp_send_500(request);
-        return ESP_FAIL;
-    }
-
-    char clear_string[10];
     bool clear = false;
 
-    if (httpd_query_key_value(qs, "clear", clear_string, sizeof(clear_string)) == ESP_OK)
+    size_t qs_size = httpd_req_get_url_query_len(request) + 1;
+    if (qs_size > 1)
     {
-        clear = atoi(clear_string) > 0;
+        char* qs = (char*)malloc(qs_size);
+
+        //ESP_LOGI(TAG, "qs_size %d qs %p", qs_size, qs);
+
+        if (qs == NULL)
+        {
+            httpd_resp_send_500(request);
+            return ESP_FAIL;
+        }
+
+        if (httpd_req_get_url_query_str(request, qs, qs_size) != ESP_OK)
+        {
+            free(qs);
+            httpd_resp_send_500(request);
+            return ESP_FAIL;
+        }
+
+        char clear_string[10];
+
+        if (httpd_query_key_value(qs, "clear", clear_string, sizeof(clear_string)) == ESP_OK)
+        {
+            clear = atoi(clear_string) > 0;
+        }
+
+        free(qs);
     }
 
-    free(qs);
+    cec_log_write(request);
 
     if (clear)
     {

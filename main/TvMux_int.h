@@ -22,4 +22,4 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext);
 bool tvmux_steam_is_on();
 bool tvmux_steam_is_open();
 void tvmux_steam_state_task(void* param);
-esp_err_t tvmux_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv);
+esp_err_t tvmux_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv, bool use_cache);

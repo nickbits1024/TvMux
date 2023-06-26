@@ -28,7 +28,7 @@ typedef struct cec_log_entry_s
 } 
 cec_log_entry_t;
 
-#define CEC_FRAME_QUEUE_LENGTH          (100)
+#define CEC_FRAME_QUEUE_LENGTH          (500)
 #define CEC_DEBUG_BIT_QUEUE_LENGTH      (1000)
 
 #define CEC_BIT_SAFETY                  (100)

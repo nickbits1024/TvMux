@@ -5,12 +5,15 @@
 
 #define CEC_FRAME_SIZE_MAX              (16)
 #define CEC_FRAME_DATA_SIZE_MAX         (15)
-#define CEC_MAX_ADDRESS                 (0x0f)
+//#define CEC_MAX_ADDRESS                 (0x0f)
 
 #define CEC_TV_HDMI_INPUT               (1)
 #define CEC_ATV_HDMI_INPUT              (1)
 #define CEC_WII_HDMI_INPUT              (2)
 #define CEC_STEAM_HDMI_INPUT            (4)
+
+#define CEC_AS_FORMAT                   "%d.%d.%d.%d"
+#define CEC_AS_ARGS(as)                 (as >> 12) & 0xf, (as >> 8) & 0xf, (as >> 4) & 0xf, as & 0xf
 
 typedef enum 
 {
@@ -30,7 +33,8 @@ typedef enum
     CEC_LA_RESERVED_2,
     CEC_LA_FREE_USE,
     CEC_LA_UNREGISTERED,
-    CEC_LA_BROADCAST = 0xf
+    CEC_LA_BROADCAST = 0xf,
+    CEC_LA_MAX = CEC_LA_FREE_USE
 } 
 cec_logical_address_t;
 
@@ -240,8 +244,8 @@ esp_err_t cec_user_control_pressed(cec_logical_address_t log_addr, cec_user_cont
 esp_err_t cec_image_view_on(cec_logical_address_t addr);
 esp_err_t cec_control(cec_logical_address_t addr, const uint8_t* request, int request_size, cec_op_code_t reply_op_code, uint8_t* reply, int* reply_size);
 esp_err_t cec_system_audio_mode_request(uint16_t phy_addr);
-esp_err_t cec_active_source(cec_logical_address_t addr);
-esp_err_t cec_power_status(cec_logical_address_t log_addr, cec_power_status_t* power_status);
+esp_err_t cec_active_source(uint16_t phy_addr);
+esp_err_t cec_power_status(cec_logical_address_t log_addr, cec_power_status_t* power_status, bool use_cache);
 esp_err_t cec_report_physical_address();
 
 

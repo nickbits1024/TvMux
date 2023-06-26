@@ -1,6 +1,5 @@
 #include <freertos/FreeRTOS.h>
-#include "wii.h"
-#include "wii_int.h"
+#include "wii_io.h"
 
 wii_request_response_t wii_sdp_request_responses[] =
 {

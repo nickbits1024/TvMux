@@ -50,7 +50,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ddc_init());
     ESP_ERROR_CHECK(cec_init());
     ESP_ERROR_CHECK(tvmux_init(&setup_enabled));
-    if (true || setup_enabled)
+    if (setup_enabled)
     {
         ESP_LOGI(TAG, "setup mode enabled");
         ESP_ERROR_CHECK(ble_init());
@@ -58,7 +58,7 @@ void app_main(void)
     else
     {
         ESP_LOGI(TAG, "setup mode disabled");
-        //ESP_ERROR_CHECK(wii_init());
+        ESP_ERROR_CHECK(wii_init());
     }
 
     ESP_ERROR_CHECK(wifi_init());

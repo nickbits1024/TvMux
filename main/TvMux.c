@@ -17,7 +17,6 @@
 
 #define TAG "TVMUX"
 
-bool tvmux_device_state[CEC_MAX_ADDRESS + 1];
 SemaphoreHandle_t tvmux_retry_sem;
 portMUX_TYPE tvmux_mux = portMUX_INITIALIZER_UNLOCKED;
 bool tvmux_steam_on_pending;
@@ -246,7 +245,7 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
         }
     }
 
-    tvmux_combine_devices_state(state, and_mode, true, true, false);
+    tvmux_combine_devices_state(state, and_mode, true, true, false, true);
 
     ESP_LOGI(TAG, "steam status start %d", *state);
 
@@ -318,7 +317,7 @@ bool wii_state_check(void* retry_param)
 
     bool state;
     return wii_query_power_state() == desired_wii_state &&
-        tvmux_combine_devices_state(&state, desired_av_state, true, true, false) == ESP_OK && state == desired_av_state;
+        tvmux_combine_devices_state(&state, desired_av_state, true, true, false, false) == ESP_OK && state == desired_av_state;
 }
 
 void wii_state_task(void* param)
@@ -350,42 +349,11 @@ esp_err_t tvmux_wii_power(bool power_on)
     return ESP_OK;
 }
 
-esp_err_t tvmux_cec_log_write(httpd_req_t* request)
-{
-    cec_log_write(request);
-
-    return ESP_OK;
-}
-
-esp_err_t tvmux_cec_log_clear()
-{
-    cec_log_clear();
-
-    return ESP_OK;
-}
-
 esp_err_t tvmux_tv_pending_get(bool* pending)
 {
     taskENTER_CRITICAL(&tvmux_mux);
     *pending = tvmux_tv_on_pending;
     taskEXIT_CRITICAL(&tvmux_mux);
-
-    return ESP_OK;
-}
-
-esp_err_t tvmux_tv_state_get(bool* tv_state, bool* pending)
-{
-    *pending = false;
-
-    if (check_retry_busy(TV_RETRY_FUNC))
-    {
-        tvmux_tv_pending_get(tv_state);
-        *pending = true;
-    }
-    else
-    {
-        ESP_RETURN_ON_ERROR(tvmux_combine_devices_state(tv_state, false, true, true, true), TAG, "%s/tvmux_combine_devices_state failed (%s)", __func__, esp_err_to_name(err_rc_));
-    }
 
     return ESP_OK;
 }
@@ -483,6 +451,24 @@ esp_err_t tvmux_steam_power(bool power_on)
     return ESP_OK;
 }
 
+
+esp_err_t tvmux_tv_state_get(bool* tv_state, bool* pending)
+{
+    *pending = false;
+
+    if (check_retry_busy(TV_RETRY_FUNC))
+    {
+        tvmux_tv_pending_get(tv_state);
+        *pending = true;
+    }
+    else
+    {
+        ESP_RETURN_ON_ERROR(tvmux_combine_devices_state(tv_state, false, true, true, true, true), TAG, "%s/tvmux_combine_devices_state failed (%s)", __func__, esp_err_to_name(err_rc_));
+    }
+
+    return ESP_OK;
+}
+
 void tvmux_tv_state_set(void* retry_param)
 {
     bool desired_state = (bool)retry_param;
@@ -506,7 +492,7 @@ bool tvmux_tv_state_check(void* retry_param)
     bool desired_state = (bool)retry_param;
 
     bool state;
-    return tvmux_combine_devices_state(&state, desired_state, true, true, true) == ESP_OK && state == desired_state;
+    return tvmux_combine_devices_state(&state, desired_state, true, true, true, false) == ESP_OK && state == desired_state;
 }
 
 void tvmux_tv_state_task(void* param)
@@ -538,14 +524,20 @@ esp_err_t tvmux_tv_power(bool power_on)
     return ESP_OK;
 }
 
-esp_err_t tvmux_device_check(bool and_mode, cec_logical_address_t log_addr, bool* combined_on, const char* name)
+esp_err_t tvmux_device_check(bool and_mode, cec_logical_address_t log_addr, bool* combined_on, const char* name, bool use_cache)
 {
     cec_power_status_t power_status;
 
-    esp_err_t result = cec_power_status(log_addr, &power_status);
-    if (result != ESP_OK) return result;
+    esp_err_t result = cec_power_status(log_addr, &power_status, use_cache);
+    if (result != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "dev check %d result %s", log_addr, esp_err_to_name(result));
+        return result;
+    }
 
     bool device_on = power_status == CEC_PS_ON || power_status == CEC_PS_TRANS_ON;            
+
+    ESP_LOGI(TAG, "%s device_on %d power_status %d", name, device_on, power_status);
 
     if (and_mode)
     {
@@ -561,21 +553,21 @@ esp_err_t tvmux_device_check(bool and_mode, cec_logical_address_t log_addr, bool
     return ESP_OK;
 }
 
-esp_err_t tvmux_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv)
+esp_err_t tvmux_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv, bool use_cache)
 {
     bool combined_on = and_mode;
 
     if (tv)
     {
-        tvmux_device_check(and_mode, CEC_LA_TV, &combined_on, "tv");
+        ESP_RETURN_ON_ERROR(tvmux_device_check(and_mode, CEC_LA_TV, &combined_on, "tv", use_cache), TAG, "tvmux_device_check failed (%s)", esp_err_to_name(err_rc_));
     }
     if (audio)
     {
-        tvmux_device_check(and_mode, CEC_LA_AUDIO_SYSTEM, &combined_on, "audio");
+        ESP_RETURN_ON_ERROR(tvmux_device_check(and_mode, CEC_LA_AUDIO_SYSTEM, &combined_on, "audio", use_cache), TAG, "tvmux_device_check failed (%s)", esp_err_to_name(err_rc_));
     }
     if (atv)
     {
-        tvmux_device_check(and_mode, CEC_LA_PLAYBACK_DEVICE_1, &combined_on, "atv");
+        ESP_RETURN_ON_ERROR(tvmux_device_check(and_mode, CEC_LA_PLAYBACK_DEVICE_1, &combined_on, "atv", use_cache), TAG, "tvmux_device_check failed (%s)", esp_err_to_name(err_rc_));
     }
 
     *state = combined_on;

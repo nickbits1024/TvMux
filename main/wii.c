@@ -10,8 +10,9 @@
 #include "btdump.h"
 #include "tvmux.h"
 #include "led.h"
-#include "wii.h"
+#include "wii_io.h"
 #include "wii_int.h"
+#include "wii.h"
 
 #define TAG "wii"
 
@@ -35,7 +36,7 @@ uint16_t wii_control_cid;
 uint16_t wii_data_cid;
 uint8_t wii_disconnect_reason;
 
-void queue_io_task(void* p)
+static void queue_io_task(void* p)
 {
     bool first_acl_send = true;
     while (true)
@@ -97,7 +98,7 @@ void queue_io_task(void* p)
     }
 }
 
-void pairing_task(void* p)
+static void pairing_task(void* p)
 {
     for (;;)
     {
@@ -158,12 +159,12 @@ void pairing_task(void* p)
     vTaskDelete(NULL);
 }
 
-void handle_read_bd_addr_complete(HCI_AUTH_READ_BD_ADDR_COMPLETE_PACKET* packet)
+static void handle_read_bd_addr_complete(HCI_AUTH_READ_BD_ADDR_COMPLETE_PACKET* packet)
 {
     memcpy(device_addr, packet->addr, BDA_SIZE);
 }
 
-void handle_read_buffer_size_complete(HCI_READ_BUFFER_SIZE_COMPLETE_PACKET* packet)
+static void handle_read_buffer_size_complete(HCI_READ_BUFFER_SIZE_COMPLETE_PACKET* packet)
 {
     if (all_controller_buffers_sem == NULL)
     {
@@ -175,7 +176,7 @@ void handle_read_buffer_size_complete(HCI_READ_BUFFER_SIZE_COMPLETE_PACKET* pack
     }
 }
 
-void handle_role_change(HCI_ROLE_CHANGE_EVENT_PACKET* packet)
+static void handle_role_change(HCI_ROLE_CHANGE_EVENT_PACKET* packet)
 {
     switch (wii_state_get())
     {
@@ -187,7 +188,7 @@ void handle_role_change(HCI_ROLE_CHANGE_EVENT_PACKET* packet)
     }
 }
 
-void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
+static void handle_connection_complete(HCI_CONNECTION_COMPLETE_EVENT_PACKET* packet)
 {
     switch (packet->status)
     {
@@ -249,7 +250,7 @@ void handle_connection_request(HCI_CONNECTION_REQUEST_EVENT_PACKET* packet)
     }
 }
 
-void handle_pin_code_request(HCI_PIN_CODE_REQUEST_EVENT_PACKET* packet)
+static void handle_pin_code_request(HCI_PIN_CODE_REQUEST_EVENT_PACKET* packet)
 {
     ESP_LOGI(TAG, "pin code request from %s...", bda_to_string(packet->addr));
 
@@ -260,7 +261,7 @@ void handle_pin_code_request(HCI_PIN_CODE_REQUEST_EVENT_PACKET* packet)
     post_bt_packet(create_hci_pin_code_request_reply_packet(packet->addr, pin, BDA_SIZE));
 }
 
-void handle_mode_change(HCI_MODE_CHANGE_EVENT_PACKET* packet)
+static void handle_mode_change(HCI_MODE_CHANGE_EVENT_PACKET* packet)
 {
     if (packet->current_mode == HCI_MODE_SNIFF)
     {
@@ -279,7 +280,7 @@ void handle_mode_change(HCI_MODE_CHANGE_EVENT_PACKET* packet)
     }
 }
 
-void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
+static void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
 {
     ESP_LOGI(TAG, "link key request from %s...", bda_to_string(packet->addr));
 
@@ -309,12 +310,12 @@ void handle_link_key_request(HCI_LINK_KEY_REQUEST_EVENT_PACKET* packet)
     }
 }
 
-void handle_link_key_notification(HCI_LINK_KEY_NOTIFICATION_EVENT_PACKET* packet)
+static void handle_link_key_notification(HCI_LINK_KEY_NOTIFICATION_EVENT_PACKET* packet)
 {
     ESP_ERROR_CHECK(nvs_set_blob(wii_nvs_handle, LINK_KEY_BLOB_NAME, packet->link_key, HCI_LINK_KEY_SIZE));
 }
 
-void peek_number_of_completed_packets(uint8_t* packet, uint16_t size)
+static void peek_number_of_completed_packets(uint8_t* packet, uint16_t size)
 {
     uint8_t num_handles = packet[3];
     uint8_t* p = packet + 4;
@@ -337,7 +338,7 @@ void peek_number_of_completed_packets(uint8_t* packet, uint16_t size)
     }
 }
 
-void handle_command_complete(uint8_t* packet, uint16_t size)
+static void handle_command_complete(uint8_t* packet, uint16_t size)
 {
     uint16_t op_code = read_uint16(packet + 4);
     switch (op_code)
@@ -351,7 +352,7 @@ void handle_command_complete(uint8_t* packet, uint16_t size)
     }
 }
 
-void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
+static void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
 {
     //ESP_LOGI(TAG, "l2cap connection request con_handle 0x%x id 0x%x psm 0x%x source_cid 0x%x", packet->con_handle, packet->identifier, packet->psm, packet->source_cid);
 
@@ -400,7 +401,7 @@ void handle_l2cap_connection_request(L2CAP_CONNECTION_REQUEST_PACKET* packet)
     // }
 }
 
-void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
+static void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
 {
     ESP_LOGI(TAG, "handle_l2cap_connection_response %u %u", packet->status, packet->result);
     if (packet->status == ERROR_CODE_SUCCESS && packet->result == L2CAP_CONNECTION_RESULT_SUCCESS)
@@ -421,7 +422,7 @@ void handle_l2cap_connection_response(L2CAP_CONNECTION_RESPONSE_PACKET* packet)
     }
 }
 
-void handle_l2cap_config_request(L2CAP_CONFIG_REQUEST_PACKET* packet)
+static void handle_l2cap_config_request(L2CAP_CONFIG_REQUEST_PACKET* packet)
 {
     //uint16_t options_size = request_packet->payload_size - 4;
 
@@ -461,20 +462,20 @@ void handle_l2cap_config_request(L2CAP_CONFIG_REQUEST_PACKET* packet)
 
 }
 
-void handle_l2cap_config_response(L2CAP_CONFIG_RESPONSE_PACKET* packet)
+static void handle_l2cap_config_response(L2CAP_CONFIG_RESPONSE_PACKET* packet)
 {
 }
 
-void handle_l2cap_disconnection_request(L2CAP_DISCONNECTION_REQUEST_PACKET* packet)
+static void handle_l2cap_disconnection_request(L2CAP_DISCONNECTION_REQUEST_PACKET* packet)
 {
     post_bt_packet(create_l2cap_disconnection_response_packet(packet->con_handle, packet->identifier, packet->dest_cid, packet->source_cid));
 }
 
-void handle_l2cap_disconnection_response(L2CAP_DISCONNECTION_RESPONSE_PACKET* packet)
+static void handle_l2cap_disconnection_response(L2CAP_DISCONNECTION_RESPONSE_PACKET* packet)
 {
 }
 
-void handle_l2cap_signal_channel(L2CAP_SIGNAL_CHANNEL_PACKET* packet)
+static void handle_l2cap_signal_channel(L2CAP_SIGNAL_CHANNEL_PACKET* packet)
 {
     switch (packet->code)
     {
@@ -505,14 +506,14 @@ void handle_l2cap_signal_channel(L2CAP_SIGNAL_CHANNEL_PACKET* packet)
     }
 }
 
-void handle_disconnection_complete(HCI_DISCONNECTION_COMPLETE_EVENT_PACKET* packet)
+static void handle_disconnection_complete(HCI_DISCONNECTION_COMPLETE_EVENT_PACKET* packet)
 {
     //led_set_rgb_color(0, 255, 0);
     wii_con_handle = INVALID_CON_HANDLE;
     xSemaphoreGive(wii_response_sem);
 }
 
-int queue_packet_handler(uint8_t* packet, uint16_t size)
+static int queue_packet_handler(uint8_t* packet, uint16_t size)
 {
     HCI_EVENT_PACKET* event_packet = (HCI_EVENT_PACKET*)packet;
     if (event_packet->type == HCI_EVENT_PACKET_TYPE &&
@@ -534,7 +535,7 @@ int queue_packet_handler(uint8_t* packet, uint16_t size)
     return 0;
 }
 
-void handle_authentication_complete(HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET* packet)
+static void handle_authentication_complete(HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET* packet)
 {
     ESP_LOGI(TAG, "auth complete con_handle 0x%x status 0x%x", packet->con_handle, packet->status);
 
@@ -552,7 +553,7 @@ void handle_authentication_complete(HCI_AUTHENTICATION_COMPLETE_EVENT_PACKET* pa
     // }
 }
 
-void post_hid_request_reponse(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_t size)
+static void post_hid_request_reponse(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_t size)
 {
     uint8_t* p = (uint8_t*)packet;
 
@@ -598,7 +599,7 @@ void post_hid_request_reponse(uint16_t con_handle, HID_REPORT_PACKET* packet, ui
 int sdp_packet_index = -1;
 int sdp_fragment_index = 0;
 
-void post_sdp_packet(uint16_t con_handle, uint16_t l2cap_size, uint8_t* data, uint16_t data_size)
+static void post_sdp_packet(uint16_t con_handle, uint16_t l2cap_size, uint8_t* data, uint16_t data_size)
 {
     sdp_packet_index++;
     sdp_fragment_index = 0;
@@ -613,7 +614,7 @@ void post_sdp_packet(uint16_t con_handle, uint16_t l2cap_size, uint8_t* data, ui
     post_bt_packet(create_l2cap_packet(con_handle, l2cap_size, wii_sdp_cid, data, data_size));
 }
 
-void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_size)
+static void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_size)
 {
     sdp_fragment_index++;
 
@@ -628,7 +629,7 @@ void post_sdp_packet_fragment(uint16_t con_handle, uint8_t* data, uint16_t data_
 }
 
 
-void handle_data_channel(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_t size)
+static void handle_data_channel(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_t size)
 {
     switch (wii_state_get())
     {
@@ -650,7 +651,7 @@ void handle_data_channel(uint16_t con_handle, HID_REPORT_PACKET* packet, uint16_
     }
 }
 
-void handle_sdp_channel(L2CAP_PACKET* packet)
+static void handle_sdp_channel(L2CAP_PACKET* packet)
 {
     for (int i = 0; i < wii_sdp_request_responses_size; i++)
     {
@@ -696,7 +697,7 @@ void handle_sdp_channel(L2CAP_PACKET* packet)
     printf("\", %u);\n", packet->l2cap_size);
 }
 
-void wii_packet_handler(uint8_t* packet, uint16_t size)
+static void wii_packet_handler(uint8_t* packet, uint16_t size)
 {
     HCI_ACL_PACKET* acl_packet = (HCI_ACL_PACKET*)packet;
     HCI_EVENT_PACKET* event_packet = (HCI_EVENT_PACKET*)packet;
@@ -769,7 +770,7 @@ void wii_packet_handler(uint8_t* packet, uint16_t size)
     }
 }
 
-void post_l2ap_config_mtu_request(uint16_t con_handle, uint16_t remote_cid, uint16_t mtu)
+static void post_l2ap_config_mtu_request(uint16_t con_handle, uint16_t remote_cid, uint16_t mtu)
 {
     uint16_t options_size = sizeof(L2CAP_CONFIG_MTU_OPTION);
     BT_PACKET_ENVELOPE* env = create_l2cap_config_request_packet(con_handle, remote_cid, 0, options_size);
@@ -783,7 +784,7 @@ void post_l2ap_config_mtu_request(uint16_t con_handle, uint16_t remote_cid, uint
     post_bt_packet(env);
 }
 
-void post_hid_report_packet(uint16_t con_handle, const uint8_t* report, uint16_t report_size)
+static void post_hid_report_packet(uint16_t con_handle, const uint8_t* report, uint16_t report_size)
 {
     ESP_LOGI(TAG, "send hid report \"");
     for (int i = 0; i < report_size; i++)
@@ -795,7 +796,7 @@ void post_hid_report_packet(uint16_t con_handle, const uint8_t* report, uint16_t
     post_bt_packet(create_l2cap_packet(con_handle, L2CAP_AUTO_SIZE, wii_data_cid, report, report_size));
 }
 
-void post_bt_packet(BT_PACKET_ENVELOPE* env)
+static void post_bt_packet(BT_PACKET_ENVELOPE* env)
 {
     env->io_direction = OUTPUT_PACKET;
     if (xQueueSend(queue_handle, &env, 0) != pdTRUE)
@@ -871,7 +872,7 @@ esp_err_t wii_init()
     return ESP_OK;
 }
 
-void wii_connect()
+static void wii_connect()
 {
     bd_addr_t null_addr = { };
     if (memcmp(wii_addr, null_addr, BDA_SIZE) == 0)
@@ -883,7 +884,7 @@ void wii_connect()
     post_bt_packet(create_hci_create_connection_packet(wii_addr, WII_PACKET_TYPES, 1, true, 0, 1));
 }
 
-bool wii_command(wii_state_t state, uint8_t on_disconnect_reason, uint8_t off_disconnect_reason)
+static bool wii_command(wii_state_t state, uint8_t on_disconnect_reason, uint8_t off_disconnect_reason)
 {
     wii_state_set(state);
     wii_on = false;
@@ -909,7 +910,7 @@ bool wii_command(wii_state_t state, uint8_t on_disconnect_reason, uint8_t off_di
     return true;
 }
 
-void open_control_channel(uint16_t con_handle)
+static void open_control_channel(uint16_t con_handle)
 {
     post_bt_packet(create_l2cap_connection_request_packet(con_handle, WII_CONTROL_PSM, WII_CONTROL_LOCAL_CID));
 }
@@ -965,7 +966,7 @@ wii_power_status_t wii_power_off()
 //     ets_ESP_LOGI(TAG, "wii pair request");
 // }
 
-wii_state_t wii_state_get()
+static wii_state_t wii_state_get()
 {
     taskENTER_CRITICAL(&wii_mux);
     wii_state_t state = wii_state;
@@ -973,7 +974,7 @@ wii_state_t wii_state_get()
     return state;
 }
 
-void wii_state_set(wii_state_t state)
+static void wii_state_set(wii_state_t state)
 {
     taskENTER_CRITICAL(&wii_mux);
     wii_state_t old_state = wii_state;

@@ -309,7 +309,7 @@ cJSON* get_json(const char* url)
         .event_handler = http_event_handler,
         .user_data = &ctx,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 30000,
+        .timeout_ms = 60000,
         .disable_auto_redirect = false,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
