@@ -103,7 +103,18 @@ bool check_retry_busy(tvmux_retry_type_t func)
 
 bool tvmux_steam_power_on()
 {
-    send_WOL(TVMUX_STEAM_MAC, 10, 1000);
+    int retry = 0;
+    do
+    {
+
+        send_WOL(TVMUX_STEAM_MAC, 10, 1000);
+        vTaskDelay(TVMUX_STEAM_RETRY_WAIT / portTICK_PERIOD_MS);
+        if (tvmux_steam_is_on())
+        {
+            return true;
+        }
+    }
+    while (++retry < TVMUX_STEAM_RETRY_MAX);
 
     return false;
 }
@@ -234,14 +245,14 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
         if (check_retry_busy(STEAM_RETRY_FUNC))
         {
             taskENTER_CRITICAL(&tvmux_mux);
-            bool steam_on_pending = tvmux_steam_on_pending;
+            *state = tvmux_steam_on_pending;
             taskEXIT_CRITICAL(&tvmux_mux);
 
-            ESP_LOGI(TAG, "Returning pending steam state %d", (bool)steam_on_pending);
+            ESP_LOGI(TAG, "Returning pending steam state %d", *state);
 
             *pending = true;
 
-            return steam_on_pending;
+            return ESP_OK;
         }
     }
 
@@ -389,7 +400,6 @@ void tvmux_steam_state_set(void* retry_param)
 
         cec_active_source(addr);
         cec_system_audio_mode_request(addr);
-        cec_image_view_on(CEC_LA_TV);
 
         ESP_LOGI(TAG, "checking steam pc...");
         if (!tvmux_steam_is_on())
@@ -402,6 +412,7 @@ void tvmux_steam_state_set(void* retry_param)
             //vTaskDelay(10000 / portTICK_PERIOD_MS);
         }
         vTaskDelay(10000 / portTICK_PERIOD_MS);
+        cec_image_view_on(CEC_LA_TV);
         ESP_LOGI(TAG, "opening steam...");
         tvmux_steam_start();
     }

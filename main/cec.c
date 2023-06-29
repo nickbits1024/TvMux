@@ -427,13 +427,10 @@ void cec_loop_task(void* param)
             {
                 if (frame.type == CEC_FRAME_TX)
                 {
-                    cec_frame_handle(&frame, false);
                     cec_frame_transmit(&frame);
                 }
-                else
-                {
-                    cec_frame_handle(&frame, false);
-                }
+
+                cec_frame_handle(&frame, false);
             }
         }
     }
@@ -1317,6 +1314,22 @@ static esp_err_t cec_frame_queue_add(cec_frame_t* frame)
     return xQueueSend(cec_frame_queue_handle, frame, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
 }
 
+esp_err_t cec_report_physical_address()
+{
+    cec_frame_t frame = { 0 };
+
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = CEC_LA_BROADCAST;
+    frame.data_size = 1;
+    frame.data[0] = CEC_OP_REPORT_PHYSICAL_ADDRESS;
+    frame.data[1] = (cec_phy_addr >> 8) & 0xff;
+    frame.data[2] = cec_phy_addr & 0xff;
+    frame.data[3] = CEC_DT_TUNER;
+
+    return cec_frame_queue_add(&frame);
+}
+
 esp_err_t cec_test()
 {
     cec_power_status_t ps;
@@ -1325,14 +1338,6 @@ esp_err_t cec_test()
     ESP_LOGI(TAG, "cec_test result %s ps %d", esp_err_to_name(result), ps);
 
     return result;
-    // cec_frame_t frame = { 0 };
-
-    // frame.type = CEC_FRAME_TX;
-    // frame.src_addr = atomic_load(&cec_log_addr);
-    // frame.dest_addr = frame.src_addr;
-    // frame.data_size = 0;
-
-    // return cec_frame_queue_add(&frame);
 }
 
 esp_err_t cec_test2()
@@ -1354,42 +1359,9 @@ esp_err_t cec_test3()
 
     frame.type = CEC_FRAME_TX;
     frame.src_addr = atomic_load(&cec_log_addr);
-    //frame.dest_addr = frame.src_addr;
     frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
     frame.data_size = 1;
-    frame.data[0] = CEC_OP_GIVE_DEVICE_POWER_STATUS;
+    frame.data[0] = CEC_OP_REQUEST_ACTIVE_SOURCE;
 
     return cec_frame_queue_add(&frame);
 }
-
-esp_err_t cec_report_physical_address()
-{
-    cec_frame_t frame = { 0 };
-
-    frame.type = CEC_FRAME_TX;
-    frame.src_addr = atomic_load(&cec_log_addr);
-    frame.dest_addr = CEC_LA_BROADCAST;
-    frame.data_size = 4;
-    frame.data[0] = CEC_OP_REPORT_PHYSICAL_ADDRESS;
-    frame.data[1] = (cec_phy_addr >> 8) & 0xff;
-    frame.data[2] = cec_phy_addr & 0xff;
-    frame.data[3] = CEC_DT_TUNER;
-
-    return cec_frame_queue_add(&frame);
-}
-
-// esp_err_t cec_report_physical_address_now()
-// {
-//    cec_frame_t frame = { 0 };
-
-//     frame.type = CEC_FRAME_TX;
-//     frame.src_addr = atomic_load(&cec_log_addr);
-//     frame.dest_addr = CEC_LA_BROADCAST;
-//     frame.data_size = 4;
-//     frame.data[0] = CEC_OP_REPORT_PHYSICAL_ADDRESS;
-//     frame.data[1] = (cec_phy_addr >> 8) & 0xff;
-//     frame.data[2] = cec_phy_addr & 0xff;
-//     frame.data[3] = CEC_DT_TUNER;
-
-//     return cec_frame_transmit(&frame);
-// }

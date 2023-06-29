@@ -5,7 +5,6 @@
 
 #define CEC_FRAME_SIZE_MAX              (16)
 #define CEC_FRAME_DATA_SIZE_MAX         (15)
-//#define CEC_MAX_ADDRESS                 (0x0f)
 
 #define CEC_TV_HDMI_INPUT               (1)
 #define CEC_ATV_HDMI_INPUT              (1)
@@ -252,9 +251,5 @@ esp_err_t cec_report_physical_address();
 esp_err_t cec_test();
 esp_err_t cec_test2();
 esp_err_t cec_test3();
-
-//esp_err_t cec_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv);
-
-//esp_err_t cec_report_physical_address_now();
 
 #endif
