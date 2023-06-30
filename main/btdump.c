@@ -373,7 +373,7 @@ const char* get_hci_op_code_name(uint16_t op_code)
         case HCI_OPCODE_READ_ENCRYPTION_KEY_SIZE:
             return "HCI_READ_ENCRYPTION_KEY_SIZE";
         default:
-            return "HCI_OPCODE_XXXX\n";
+            return "HCI_OPCODE_XXXX";
     }
 }
 

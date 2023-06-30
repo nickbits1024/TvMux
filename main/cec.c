@@ -194,7 +194,7 @@ static void IRAM_ATTR cec_isr_debug(void* param)
         {
             if (first)
             {
-                ets_printf("cec_isr_debug queue full\n");
+                ESP_DRAM_LOGE(TAG, "cec_isr_debug queue full");
                 first = false;
             }
         }
@@ -247,7 +247,7 @@ static void IRAM_ATTR cec_isr(void* param)
             { 
                 if (first)
                 {
-                    ESP_DRAM_LOGE(TAG, "cec_isr queue full\n");
+                    ESP_DRAM_LOGE(TAG, "cec_isr queue full");
                     first = false;
                 }
             }

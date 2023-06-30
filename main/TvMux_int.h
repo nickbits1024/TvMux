@@ -16,6 +16,9 @@
 #define TVMUX_RETRY_WAIT_MS             (10000)
 #define TVMUX_RETRY_CHECK_WAIT_MS       (15000)
 
+#define TVMUX_STEAM_TOPOLOGY_INTERNAL   "Internal"
+#define TVMUX_STEAM_TOPOLOGY_EXTERNAL   "External"
+
 #define HTTP_SUCCESS(http_code)         ((http_code) >= 200 && (http_code) <= 299)
 
 uint8_t readI2CByte(uint8_t data_addr);
@@ -24,5 +27,6 @@ bool parse_edid_extension(uint8_t* edid2, uint8_t* ext);
 
 bool tvmux_steam_is_on();
 bool tvmux_steam_is_open();
+void tvmux_steam_topology(const char* topology);
 void tvmux_steam_state_task(void* param);
 esp_err_t tvmux_combine_devices_state(bool* state, bool and_mode, bool tv, bool audio, bool atv, bool use_cache);

@@ -236,6 +236,15 @@ bool tvmux_steam_is_open()
     return open;
 }
 
+void tvmux_steam_topology(const char* topology)
+{
+    // cJSON* json = tvmux_steam_get_json("/api/steam/status");
+    // if (json != NULL)
+    // {
+    //     cJSON_Delete(json);
+    // }
+}
+
 esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pending)
 {
     if (pending != NULL)
@@ -398,9 +407,6 @@ void tvmux_steam_state_set(void* retry_param)
     {
         uint16_t addr = CEC_TV_HDMI_INPUT << 12 | CEC_STEAM_HDMI_INPUT << 8;
 
-        cec_active_source(addr);
-        cec_system_audio_mode_request(addr);
-
         ESP_LOGI(TAG, "checking steam pc...");
         if (!tvmux_steam_is_on())
         {
@@ -411,14 +417,18 @@ void tvmux_steam_state_set(void* retry_param)
             }
             //vTaskDelay(10000 / portTICK_PERIOD_MS);
         }
+        cec_active_source(addr);
+        cec_system_audio_mode_request(addr);
+
         vTaskDelay(10000 / portTICK_PERIOD_MS);
         cec_image_view_on(CEC_LA_TV);
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "opening steam...");
         tvmux_steam_start();
     }
     else
     {
-        ESP_LOGI(TAG, "turn steam off\n");
+        ESP_LOGI(TAG, "turn steam off");
         cec_standby();
         tvmux_steam_close();
         steam_power_off();
@@ -441,11 +451,11 @@ void tvmux_steam_state_task(void* param)
 
     if (tvmux_call_with_retry(STEAM_RETRY_FUNC, tvmux_steam_state_set, tvmux_steam_state_check, (void*)desired_state))
     {
-        ESP_LOGI(TAG, "set_steam_state = %u succeeded\n", desired_state);
+        ESP_LOGI(TAG, "set_steam_state = %u succeeded", desired_state);
     }
     else
     {
-        ESP_LOGE(TAG, "set_steam_state = %u failed\n", desired_state);
+        ESP_LOGE(TAG, "set_steam_state = %u failed", desired_state);
     }
 
     vTaskDelete(NULL);
@@ -491,6 +501,11 @@ void tvmux_tv_state_set(void* retry_param)
         cec_image_view_on(CEC_LA_TV);
         cec_system_audio_mode_request(addr);
         cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_POWER_ON_FUNCTION);
+
+        if (tvmux_steam_is_on())
+        {
+            tvmux_steam_topology(TVMUX_STEAM_TOPOLOGY_INTERNAL);
+        }
     }
     else
     {

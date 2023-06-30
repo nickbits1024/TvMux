@@ -146,7 +146,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
             }
             else
             {
-                ESP_LOGI(TAG, "Stop adv successfully\n");
+                ESP_LOGI(TAG, "Stop adv successfully");
             }
             break;
         case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:

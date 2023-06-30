@@ -310,12 +310,10 @@ esp_err_t webserver_tv_post(httpd_req_t* request)
 
     if (strcmp(state_value, "on") == 0)
     {
-        printf("turn tv on\n");
         desired_state = true;
     }
     else if (strcmp(state_value, "off") == 0)
     {
-        printf("turn tv off\n");
         desired_state = false;
     }
     else
@@ -599,7 +597,7 @@ esp_err_t webserver_cec_get(httpd_req_t* request)
         return ESP_FAIL;
     }
 
-    printf("cec cmd=%s reply_command=%s\n", cmd_string, reply_cmd_string);
+    ESP_LOGI(TAG, "cec cmd=%s reply_command=%s", cmd_string, reply_cmd_string);
     const char* hex = cmd_string;
     unsigned int temp;
     for (int i = 0; i < len; i++)
