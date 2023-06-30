@@ -128,6 +128,14 @@ cJSON* tvmux_steam_get_json(const char* path)
     return get_json(url);
 }
 
+cJSON* tvmux_steam_post_json(const char* path, cJSON* post_object)
+{
+    char url[100];
+    snprintf(url, sizeof(url), "http://%s:%d%s", TVMUX_STEAM_HOSTNAME, TVMUX_STEAM_PORT, path);
+
+    return post_json(url, post_object);
+}
+
 bool tvmux_steam_get(const char* path)
 {
     cJSON* json = tvmux_steam_get_json(path);
@@ -177,9 +185,9 @@ void steam_power_off()
     }   
 }
 
-bool tvmux_steam_topology_check()
+bool tvmux_steam_topology_check(const char* topology)
 {
-    bool external = false;
+    bool match = false;
 
     cJSON* json = tvmux_steam_get_json("/api/monitor/topology");
     if (json != NULL)
@@ -190,8 +198,8 @@ bool tvmux_steam_topology_check()
             const char* topology_value = cJSON_GetStringValue(topology_prop);
             if (topology_value != NULL)
             {
-                external = strcasecmp(topology_value, "External") == 0;
-                ESP_LOGI(TAG, "topology: %s %d", topology_value, external);
+                match = strcasecmp(topology_value, topology) == 0;
+                ESP_LOGI(TAG, "topology: %s match: %s", topology_value, match ? "yes" : "no");
             }
         }
         cJSON_Delete(json);
@@ -201,7 +209,7 @@ bool tvmux_steam_topology_check()
         ESP_LOGE(TAG, "tvmux_steam_topology_check failed");
     }
 
-    return external;
+    return match;
 }
 
 bool tvmux_steam_is_on()
@@ -238,11 +246,30 @@ bool tvmux_steam_is_open()
 
 void tvmux_steam_topology(const char* topology)
 {
-    // cJSON* json = tvmux_steam_get_json("/api/steam/status");
-    // if (json != NULL)
-    // {
-    //     cJSON_Delete(json);
-    // }
+    cJSON* post_object = cJSON_CreateObject();
+    
+    if (cJSON_AddStringToObject(post_object, "topology", topology) == NULL) goto cleanup;
+
+    cJSON* json = tvmux_steam_post_json("/api/monitor/topology", post_object);
+    if (json != NULL)
+    {
+        cJSON* topology_prop = cJSON_GetObjectItem(json, "topology");
+        if (topology_prop != NULL)
+        {
+            const char* topology_value = cJSON_GetStringValue(topology_prop);
+            if (topology_value != NULL)
+            {
+                ESP_LOGI(TAG, "topology: %s", topology_value);
+            }
+        }
+        cJSON_Delete(json);
+    }
+
+cleanup:
+    if (post_object != NULL)
+    {
+        cJSON_Delete(post_object);
+    }
 }
 
 esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pending)
@@ -279,7 +306,7 @@ esp_err_t tvmux_steam_state(bool and_mode, bool exclusive, bool* state, bool* pe
         }
         if (state)
         {
-            *state &= tvmux_steam_topology_check();
+            *state &= tvmux_steam_topology_check(TVMUX_STEAM_TOPOLOGY_EXTERNAL);
             ESP_LOGI(TAG, "steam status topology %d", *state);            
         }
         if (state)
@@ -504,6 +531,7 @@ void tvmux_tv_state_set(void* retry_param)
 
         if (tvmux_steam_is_on())
         {
+            vTaskDelay(10000 / portTICK_PERIOD_MS);
             tvmux_steam_topology(TVMUX_STEAM_TOPOLOGY_INTERNAL);
         }
     }
@@ -518,7 +546,8 @@ bool tvmux_tv_state_check(void* retry_param)
     bool desired_state = (bool)retry_param;
 
     bool state;
-    return tvmux_combine_devices_state(&state, desired_state, true, true, true, false) == ESP_OK && state == desired_state;
+    return (!tvmux_steam_is_on() || tvmux_steam_topology_check(TVMUX_STEAM_TOPOLOGY_INTERNAL)) &&
+        tvmux_combine_devices_state(&state, desired_state, true, true, true, false) == ESP_OK && state == desired_state;
 }
 
 void tvmux_tv_state_task(void* param)

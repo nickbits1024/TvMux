@@ -259,7 +259,7 @@ uint8_t* http_assemble(http_context_t* ctx)
         return NULL;
     }
 
-    ESP_LOGI(TAG, "response size: %u", ctx->response_size);
+    //ESP_LOGI(TAG, "response size: %u", ctx->response_size);
 
     uint8_t* buffer = (uint8_t*)malloc(ctx->response_size + 1);
     if (buffer == NULL)
@@ -287,6 +287,21 @@ uint8_t* http_assemble(http_context_t* ctx)
     }
     buffer[ctx->response_size] = 0;
 
+    if (ctx->response_size >= 1)
+    {
+        if (buffer[ctx->response_size - 1] == '\n')
+        {
+            buffer[--ctx->response_size] = 0;
+        }
+    }
+    if (ctx->response_size >= 1)
+    {
+        if (buffer[ctx->response_size - 1] == '\r')
+        {
+            buffer[--ctx->response_size] = 0;
+        }
+    }
+
     ctx->first_chunk = NULL;
     ctx->last_chunk = NULL;
 
@@ -295,12 +310,12 @@ uint8_t* http_assemble(http_context_t* ctx)
     return buffer;
 }
 
-cJSON* get_json(const char* url)
+cJSON* http_json(const char* url, cJSON* post_object, esp_http_client_method_t method)
 {
     esp_err_t ret = ESP_OK;
-
     cJSON* json = NULL;
     char* json_string = NULL;
+    char* post_string = NULL;
 
     http_context_t ctx = { .result = ESP_OK };
 
@@ -309,28 +324,51 @@ cJSON* get_json(const char* url)
         .event_handler = http_event_handler,
         .user_data = &ctx,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 60000,
+        .timeout_ms = HTTP_TIMEOUT,
+        .method = method,
         .disable_auto_redirect = false,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
 
+    if (post_object != NULL)
+    {
+        post_string = cJSON_PrintUnformatted(post_object);
+        if (post_string == NULL) goto cleanup;
+
+        ESP_GOTO_ON_ERROR(esp_http_client_set_header(client, "Content-Type", "application/json"), cleanup, TAG, "%s/esp_http_client_set_header failed (%s)", __func__, esp_err_to_name(err_rc_));
+        ESP_GOTO_ON_ERROR(esp_http_client_set_post_field(client,  post_string, strlen(post_string)), cleanup, TAG, "%s/esp_http_client_set_header failed (%s)", __func__, esp_err_to_name(err_rc_));
+    }
     ESP_GOTO_ON_ERROR(esp_http_client_perform(client), cleanup, TAG, "%s/esp_http_client_perform failed (%s)", __func__, esp_err_to_name(err_rc_));
 
+    const char* post_msg = post_string != NULL ? post_string : "NULL";
+
     int http_status = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "%s status: %d", url, http_status);
     if (http_status >= 200 && http_status < 300)
     {
         json_string = (char*)http_assemble(&ctx);
         if (json_string != NULL)
         {
-            //ESP_LOGI(TAG, "json: %s", json_string);
+            ESP_LOGI(TAG, "%s request: %s response: %d %s", url, post_msg, http_status, json_string);
 
             json = cJSON_ParseWithLength(json_string, ctx.response_size);
         }
-    }    
+        else
+        {
+            ESP_LOGE(TAG, "%s request: %s response: %d error ESP_ERR_NO_MEM", url, post_msg, http_status);
+        }
+    }
+    else
+    {
+        ESP_LOGE(TAG, "%s request: %s response: %d", url, post_msg, http_status);
+    }
 
 cleanup:
     http_cleanup(&ctx);
+
+    if (post_string != NULL)
+    {
+        cJSON_free(post_string);
+    }
 
     if (client != NULL)
     {
@@ -347,6 +385,67 @@ cleanup:
     }
 
     return json;
+
+}
+
+cJSON* post_json(const char* url, cJSON* post_object)
+{
+    return http_json(url, post_object, HTTP_METHOD_POST);
+}
+
+cJSON* get_json(const char* url)
+{
+    return http_json(url, NULL, HTTP_METHOD_GET);
+//     esp_err_t ret = ESP_OK;
+
+//     cJSON* json = NULL;
+//     char* json_string = NULL;
+
+//     http_context_t ctx = { .result = ESP_OK };
+
+//     esp_http_client_config_t config = {
+//         .url = url,
+//         .event_handler = http_event_handler,
+//         .user_data = &ctx,
+//         .crt_bundle_attach = esp_crt_bundle_attach,
+//         .timeout_ms = 60000,
+//         .disable_auto_redirect = false,
+//     };
+//     esp_http_client_handle_t client = esp_http_client_init(&config);
+
+//     ESP_GOTO_ON_ERROR(esp_http_client_perform(client), cleanup, TAG, "%s/esp_http_client_perform failed (%s)", __func__, esp_err_to_name(err_rc_));
+
+//     int http_status = esp_http_client_get_status_code(client);
+//     ESP_LOGI(TAG, "%s status: %d", url, http_status);
+//     if (http_status >= 200 && http_status < 300)
+//     {
+//         json_string = (char*)http_assemble(&ctx);
+//         if (json_string != NULL)
+//         {
+//             //ESP_LOGI(TAG, "json: %s", json_string);
+
+//             json = cJSON_ParseWithLength(json_string, ctx.response_size);
+//         }
+//     }    
+
+// cleanup:
+//     http_cleanup(&ctx);
+
+//     if (client != NULL)
+//     {
+//         esp_http_client_cleanup(client);
+//     }
+//     if (json_string != NULL)
+//     {
+//         free(json_string);
+//     }
+
+//     if (ret != ESP_OK)
+//     {
+//         ESP_LOGE(TAG, "get_json failed (%s)", esp_err_to_name(ret));
+//     }
+
+//     return json;
 }
 
 void send_WOL(const char* mac, int repeat, int repeat_delay_ms)
