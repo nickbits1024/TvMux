@@ -9,12 +9,15 @@
 #define TVMUX_STEAM_PING_COUNT          (2)
 #define TVMUX_STEAM_PING_INTERVAL       (500)
 
-#define TVMUX_STEAM_RETRY_WAIT          (5000)
-#define TVMUX_STEAM_RETRY_MAX           (6)
+#define TVMUX_STEAM_RETRY_WAIT          (1000)
+#define TVMUX_STEAM_ON_WAIT             (10000)
+#define TVMUX_STEAM_RETRY_MAX           (20)
 
 #define TVMUX_RETRY_MAX                 (3)
 #define TVMUX_RETRY_WAIT_MS             (10000)
 #define TVMUX_RETRY_CHECK_WAIT_MS       (15000)
+
+#define TVMUX_STANDBY_DELAY             (5000)
 
 #define TVMUX_STEAM_TOPOLOGY_INTERNAL   "Internal"
 #define TVMUX_STEAM_TOPOLOGY_EXTERNAL   "External"

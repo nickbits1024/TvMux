@@ -107,10 +107,11 @@ bool tvmux_steam_power_on()
     do
     {
 
-        send_WOL(TVMUX_STEAM_MAC, 10, 1000);
+        send_WOL(TVMUX_STEAM_MAC, 10, 100);
         vTaskDelay(TVMUX_STEAM_RETRY_WAIT / portTICK_PERIOD_MS);
         if (tvmux_steam_is_on())
         {
+            vTaskDelay(TVMUX_STEAM_ON_WAIT / portTICK_PERIOD_MS);
             return true;
         }
     }
@@ -118,7 +119,6 @@ bool tvmux_steam_power_on()
 
     return false;
 }
-
 
 cJSON* tvmux_steam_get_json(const char* path)
 {
@@ -353,6 +353,7 @@ void wii_state_set(void* retry_param)
     {
         wii_power_off();
         cec_standby();
+        vTaskDelay(TVMUX_STANDBY_DELAY / portTICK_PERIOD_MS);
     }
 }
 
@@ -442,14 +443,12 @@ void tvmux_steam_state_set(void* retry_param)
             {
                 return;
             }
-            //vTaskDelay(10000 / portTICK_PERIOD_MS);
         }
+        cec_image_view_on(CEC_LA_TV);
         cec_active_source(addr);
         cec_system_audio_mode_request(addr);
-
+        tvmux_steam_topology(TVMUX_STEAM_TOPOLOGY_INTERNAL);
         vTaskDelay(10000 / portTICK_PERIOD_MS);
-        cec_image_view_on(CEC_LA_TV);
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "opening steam...");
         tvmux_steam_start();
     }
@@ -459,6 +458,7 @@ void tvmux_steam_state_set(void* retry_param)
         cec_standby();
         tvmux_steam_close();
         steam_power_off();
+        vTaskDelay(TVMUX_STANDBY_DELAY / portTICK_PERIOD_MS);
     }
 }
 
@@ -538,6 +538,7 @@ void tvmux_tv_state_set(void* retry_param)
     else
     {
         cec_standby();
+        vTaskDelay(TVMUX_STANDBY_DELAY / portTICK_PERIOD_MS);
     }
 }
 
