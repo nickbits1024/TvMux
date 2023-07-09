@@ -340,11 +340,10 @@ void cec_loop_task(void* param)
     for (;;)
     {
         ESP_LOGI(TAG, "Waiting for hotplug signal...");
-        // FIXME
-        // while (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
-        // { 
-        //     vTaskDelay(50 / portTICK_PERIOD_MS);
-        // }
+        while (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
+        { 
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
 
         ESP_LOGI(TAG, "Hotplug signal detected!");
 

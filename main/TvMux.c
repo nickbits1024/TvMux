@@ -31,7 +31,7 @@ esp_err_t tvmux_init(bool* setup_enabled)
     io_conf.pin_bit_mask = TVMUX_SETUP_GPIO_SEL;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type = GPIO_INTR_DISABLE;
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
