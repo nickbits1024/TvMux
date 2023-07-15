@@ -40,7 +40,8 @@ cec_logical_address_t;
 typedef enum
 {
     CEC_FRAME_RX,
-    CEC_FRAME_TX    
+    CEC_FRAME_TX,
+    CEC_FRAME_DELAY
 } 
 cec_frame_type_t;
 
@@ -240,6 +241,8 @@ esp_err_t cec_log_clear();
 
 esp_err_t cec_standby();
 esp_err_t cec_user_control_pressed(cec_logical_address_t log_addr, cec_user_control_code_t ucc);
+esp_err_t cec_user_control_released(cec_logical_address_t log_addr, cec_user_control_code_t ucc);
+esp_err_t cec_user_control_click(cec_logical_address_t log_addr, cec_user_control_code_t ucc);
 esp_err_t cec_image_view_on(cec_logical_address_t addr);
 esp_err_t cec_control(cec_logical_address_t addr, const uint8_t* request, int request_size, cec_op_code_t reply_op_code, uint8_t* reply, int* reply_size);
 esp_err_t cec_system_audio_mode_request(uint16_t phy_addr);

@@ -6,6 +6,7 @@
 #define HDMI_CEC_GPIO_SEL               (1ull << HDMI_CEC_GPIO_NUM)
 #define HDMI_CEC_GPIO_2_NUM             (GPIO_NUM_17)
 #define HDMI_CEC_GPIO_2_SEL             (1ull << HDMI_CEC_GPIO_2_NUM)
+#define CEC_QUEUE_TIMEOUT               (1000)
 #define CEC_DEVICE_TYPE                 CEC_Device::CDT_TUNER
 #define CEC_MAX_LOG_ENTRIES             256
 

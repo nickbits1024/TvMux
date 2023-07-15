@@ -527,7 +527,7 @@ void tvmux_tv_state_set(void* retry_param)
         cec_active_source(addr);
         cec_image_view_on(CEC_LA_TV);
         cec_system_audio_mode_request(addr);
-        cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_POWER_ON_FUNCTION);
+        cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_POWER_ON_FUNCTION);
 
         if (tvmux_steam_is_on())
         {
@@ -537,6 +537,8 @@ void tvmux_tv_state_set(void* retry_param)
     }
     else
     {
+        cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_ROOT_MENU);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
         cec_standby();
         vTaskDelay(TVMUX_STANDBY_DELAY / portTICK_PERIOD_MS);
     }

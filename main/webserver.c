@@ -204,7 +204,7 @@ esp_err_t webserver_tv_pause_get(httpd_req_t* request)
 {
     cJSON* response_doc = cJSON_CreateObject();
 
-    cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_PAUSE);
+    cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_PAUSE);
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
 
@@ -217,7 +217,7 @@ esp_err_t webserver_tv_play_get(httpd_req_t* request)
 {
     cJSON* response_doc = cJSON_CreateObject();
 
-    cec_user_control_pressed(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_PLAY);
+    cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_PLAY);
 
     cJSON_AddStringToObject(response_doc, "status", "ok");
 

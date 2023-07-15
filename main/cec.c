@@ -422,14 +422,55 @@ void cec_loop_task(void* param)
 
         for (;;)
         {
-            if (xQueueReceive(cec_frame_queue_handle, &frame, portMAX_DELAY) == pdTRUE)
+            if (xQueueReceive(cec_frame_queue_handle, &frame, CEC_QUEUE_TIMEOUT / portTICK_PERIOD_MS) == pdTRUE)
             {
-                if (frame.type == CEC_FRAME_TX)
+                int delay;
+                switch (frame.type)
                 {
+                case CEC_FRAME_DELAY:                    
+                    switch (frame.data_size)
+                    {
+                    case 1:
+                        delay = frame.data[0];
+                        break;
+                    case 2:
+                        delay = *((uint16_t*)frame.data);
+                        break;
+                    case 4:
+                        delay = *((uint32_t*)frame.data);
+                        break;
+                    default:
+                        delay = 0;
+                        break;
+                    }
+                    if (delay != 0)
+                    {
+                        ESP_LOGI(TAG, "frame delay %d", delay);
+                        vTaskDelay(delay / portTICK_PERIOD_MS);
+                    }
+                    continue;
+                case CEC_FRAME_TX:
                     cec_frame_transmit(&frame);
+                    break;
+                case CEC_FRAME_RX:
+                    break;
                 }
 
                 cec_frame_handle(&frame, false);
+            }
+
+            if (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
+            {
+                // ignore false disconnects
+                vTaskDelay(5000 / portTICK_PERIOD_MS);
+                if (gpio_get_level(HDMI_HOTPLUG_GPIO_NUM) == 1)
+                {
+                    break;
+                }
+                else
+                {
+                    ESP_LOGI(TAG, "HDMI false disconnect");
+                }
             }
         }
     }
@@ -669,6 +710,35 @@ esp_err_t cec_user_control_pressed(cec_logical_address_t log_addr, cec_user_cont
     frame.data[1] = ucc;
 
     return cec_frame_queue_add(&frame);
+}
+
+esp_err_t cec_user_control_released(cec_logical_address_t log_addr, cec_user_control_code_t ucc)
+{
+    cec_frame_t frame = { 0 };
+
+    frame.type = CEC_FRAME_TX;
+    frame.src_addr = atomic_load(&cec_log_addr);
+    frame.dest_addr = log_addr;
+    frame.data_size = 3;
+    frame.data[0] = CEC_OP_USER_CONTROL_RELEASED;
+    frame.data[1] = ucc;
+
+    return cec_frame_queue_add(&frame);
+}
+
+esp_err_t cec_user_control_click(cec_logical_address_t log_addr, cec_user_control_code_t ucc)
+{
+    ESP_RETURN_ON_ERROR(cec_user_control_pressed(log_addr, ucc), TAG, "%s/cec_user_control_pressed failed (%s)", __func__, esp_err_to_name(err_rc_));
+
+    cec_frame_t frame = { 0 };
+
+    frame.type = CEC_FRAME_DELAY;
+    frame.data_size = 2;
+    *((uint16_t*)frame.data) = 100;
+
+    ESP_RETURN_ON_ERROR(cec_frame_queue_add(&frame), TAG, "%s/cec_user_control_pressed failed (%s)", __func__, esp_err_to_name(err_rc_));
+
+    ESP_RETURN_ON_ERROR(cec_user_control_released(log_addr, ucc), TAG, "%s/cec_user_control_released failed (%s)", __func__, esp_err_to_name(err_rc_));
 
     return ESP_OK;
 }
@@ -1320,7 +1390,7 @@ esp_err_t cec_report_physical_address()
     frame.type = CEC_FRAME_TX;
     frame.src_addr = atomic_load(&cec_log_addr);
     frame.dest_addr = CEC_LA_BROADCAST;
-    frame.data_size = 1;
+    frame.data_size = 4;
     frame.data[0] = CEC_OP_REPORT_PHYSICAL_ADDRESS;
     frame.data[1] = (cec_phy_addr >> 8) & 0xff;
     frame.data[2] = cec_phy_addr & 0xff;
@@ -1331,36 +1401,27 @@ esp_err_t cec_report_physical_address()
 
 esp_err_t cec_test()
 {
-    cec_power_status_t ps;
-    esp_err_t result =  cec_power_status(CEC_LA_AUDIO_SYSTEM, &ps, true);
+    esp_err_t result = cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_ROOT_MENU);
 
-    ESP_LOGI(TAG, "cec_test result %s ps %d", esp_err_to_name(result), ps);
+    ESP_LOGI(TAG, "cec_test result %s ps", esp_err_to_name(result));
 
     return result;
 }
 
 esp_err_t cec_test2()
 {
-    cec_frame_t frame = { 0 };
+    esp_err_t result = cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_CONTENTS_MENU);
 
-    frame.type = CEC_FRAME_TX;
-    frame.src_addr = atomic_load(&cec_log_addr);
-    frame.dest_addr = CEC_LA_TV;
-    frame.data_size = 1;
-    frame.data[0] = CEC_OP_GIVE_PHYSICAL_ADDRESS;
+    ESP_LOGI(TAG, "cec_test result %s ps", esp_err_to_name(result));
 
-    return cec_frame_queue_add(&frame);
+    return result;
 }
 
 esp_err_t cec_test3()
 {
-    cec_frame_t frame = { 0 };
+    esp_err_t result = cec_user_control_click(CEC_LA_PLAYBACK_DEVICE_1, CEC_OP_UCC_FAVORITE_MENU);
 
-    frame.type = CEC_FRAME_TX;
-    frame.src_addr = atomic_load(&cec_log_addr);
-    frame.dest_addr = CEC_LA_AUDIO_SYSTEM;
-    frame.data_size = 1;
-    frame.data[0] = CEC_OP_REQUEST_ACTIVE_SOURCE;
+    ESP_LOGI(TAG, "cec_test result %s ps", esp_err_to_name(result));
 
-    return cec_frame_queue_add(&frame);
+    return result;
 }
