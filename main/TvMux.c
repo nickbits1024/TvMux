@@ -447,8 +447,13 @@ void tvmux_steam_state_set(void* retry_param)
         cec_image_view_on(CEC_LA_TV);
         cec_active_source(addr);
         cec_system_audio_mode_request(addr);
-        tvmux_steam_topology(TVMUX_STEAM_TOPOLOGY_INTERNAL);
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        vTaskDelay(15000 / portTICK_PERIOD_MS);
+        int retry = TVMUX_RETRY_MAX;
+        while (!tvmux_steam_topology_check(TVMUX_STEAM_TOPOLOGY_INTERNAL) && retry-- > 0)
+        {
+            tvmux_steam_topology(TVMUX_STEAM_TOPOLOGY_INTERNAL);
+            vTaskDelay(15000 / portTICK_PERIOD_MS);
+        }
         ESP_LOGI(TAG, "opening steam...");
         tvmux_steam_start();
     }

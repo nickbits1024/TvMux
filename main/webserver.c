@@ -2,6 +2,7 @@
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -30,9 +31,9 @@ esp_err_t webserver_init()
 
     httpd_uri = (httpd_uri_t)
     {
-        .uri = "/heap",
+        .uri = "/debug",
         .method = HTTP_GET,
-        .handler = webserver_heap_get,
+        .handler = webserver_debug_get,
         .user_ctx = NULL
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(webserver_handle, &httpd_uri));
@@ -169,9 +170,28 @@ void webserver_complete_request(httpd_req_t* request, cJSON* response_doc)
     cJSON_Delete(response_doc);
 }
 
-esp_err_t webserver_heap_get(httpd_req_t* request)
+esp_err_t webserver_debug_get(httpd_req_t* request)
 {
     cJSON* response_doc = cJSON_CreateObject();
+
+    double uptime = esp_timer_get_time() / 1000000.0;
+
+    int days = (int)(uptime / (3600 * 24));
+    uptime -= days * 3600 * 24;
+
+    int hours = (int)(uptime / 3600);
+    uptime -= hours * 3600;
+
+    int minutes = (int)(uptime / 60);
+    uptime -= minutes * 60;
+
+    int remaining_seconds = (int)uptime;
+
+    // Create the pretty string
+    char pretty_uptime[100];
+    snprintf(pretty_uptime, sizeof(pretty_uptime), "%d days, %d hours, %d minutes, and %d seconds", days, hours, minutes, remaining_seconds);
+
+    cJSON_AddStringToObject(response_doc, "uptime", pretty_uptime);
 
     multi_heap_info_t heap_info;
     heap_caps_get_info(&heap_info, MALLOC_CAP_INTERNAL);

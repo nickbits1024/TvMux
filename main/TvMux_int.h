@@ -10,7 +10,7 @@
 #define TVMUX_STEAM_PING_INTERVAL       (500)
 
 #define TVMUX_STEAM_RETRY_WAIT          (1000)
-#define TVMUX_STEAM_ON_WAIT             (10000)
+#define TVMUX_STEAM_ON_WAIT             (15000)
 #define TVMUX_STEAM_RETRY_MAX           (20)
 
 #define TVMUX_RETRY_MAX                 (3)
