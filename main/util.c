@@ -60,6 +60,7 @@ ping_callback_data_t;
 
 void ping_dns_found(const char* name, const ip_addr_t* addr, void* arg)
 {
+    ESP_DRAM_LOGI(TAG, "name=%s data=%p", name, arg);
     ping_callback_data_t* data = (ping_callback_data_t*)arg;
 
     if (addr != NULL)
@@ -74,6 +75,7 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
     esp_err_t ret = ESP_OK;
     ip_addr_t addr;
     SemaphoreHandle_t sem = xSemaphoreCreateBinary();  
+    esp_ping_handle_t ping_handle = NULL;
 
     bool success = false;
 
@@ -84,6 +86,11 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
     };
 
     err_t dns_ret = dns_gethostbyname(host_name, &addr, ping_dns_found, &data);
+    if (dns_ret == ESP_OK)
+    {
+        success = true;
+    }
+    else 
     if (dns_ret == ERR_INPROGRESS)
     {
         success = xSemaphoreTake(sem, PING_DNS_TIMEOUT) == pdTRUE;
@@ -92,6 +99,7 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
     {
         goto cleanup;
     }
+    ESP_LOGI(TAG, "dns=%d success=%d ip=" IPSTR, dns_ret, success, IP2STR(&addr));
     
     if (!success)
     {
@@ -112,8 +120,6 @@ esp_err_t ping(const char* host_name, int count, int interval, int* pongs)
     cbs.on_ping_timeout = ping_timeout;
     cbs.on_ping_end = ping_end;
     cbs.cb_args = pongs;
-
-    esp_ping_handle_t ping_handle = NULL;
 
     ESP_GOTO_ON_ERROR(esp_ping_new_session(&ping_config, &cbs, &ping_handle), 
             cleanup, TAG, "esp_ping_new_session (%s)", esp_err_to_name(err_rc_));
